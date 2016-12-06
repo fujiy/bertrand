@@ -1,0 +1,49 @@
+name:                bertrand
+version:             0.1.0.0
+synopsis:            A purely functional, logic programming language
+description:         Please see README.md
+homepage:            https://github.com/githubuser/bertrand#readme
+license:             BSD3
+license-file:        LICENSE
+author:              Yuuki Fujihara
+maintainer:          fujiee.y@gmail.com
+copyright:           2016 Yuuki Fujihara
+category:            Language
+build-type:          Simple
+-- extra-source-files:
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:     Bertrand
+                     , Bertrand.REPL
+                     , Bertrand.Data
+                     , Bertrand.Preprocessor
+                     , Bertrand.Parser
+                     , Bertrand.Interpreter
+  build-depends:       base >= 4.7 && < 5
+                     , mtl
+                     , containers
+                     , transformers
+  default-language:    Haskell2010
+
+executable bertrand
+  hs-source-dirs:      app
+  main-is:             Main.hs
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  build-depends:       base
+                     , bertrand
+  default-language:    Haskell2010
+
+test-suite bertrand-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+  build-depends:       base
+                     , bertrand
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/githubuser/bertrand

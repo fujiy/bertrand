@@ -1,0 +1,29 @@
+
+
+
+a, b = x ! x = a or x = b
+
+
+1, 2
+
+1 , 2 == 2 ?
+
+double x = x * 2
+
+double x
+
+
+f (double (0, 1)) = 0
+f x      = 1
+
+
+a * b < c
+
+a * b c
+
+a + b + c
+
+(a + b) + c
+
+a < b < c
+a < b and b < c
