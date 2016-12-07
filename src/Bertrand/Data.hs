@@ -2,81 +2,14 @@
 module Bertrand.Data
     ( Expr(..), emap
     , ParseOption(..)
-    -- Token(..)
-    -- , Statement(..)
-    -- , InfixType(..)
-    -- , Parser
-    -- , runParser
-    -- , item
-    -- , eof
-    -- , ParserS(..)
-    -- , purePS
-    -- , ParseError(..)
-    -- , ErrorType(..)
+    , Memory, Ref, memory, new, fromList
     ) where
 
 
+import Data.Bits
 import Data.List
-import qualified Data.IntMap as M
-
-
--- data Parser s a = Parser {runParser :: s -> (Maybe a, s)}
---
--- instance Functor (Parser s) where
---     fmap f p = Parser $ \s -> let (m, s') = runParser p s
---                               in  (fmap f m, s')
---
--- instance Applicative (Parser s) where
---     pure = return
---     (<*>) = ap
---
--- instance Monad (Parser s) where
---     return x = Parser $ \s -> (pure x, s)
---     p >>= f  = Parser $ \s -> let (m, s') = runParser p s
---                               in maybe (Nothing, s) (\a -> runParser (f a) s') m
---
--- instance ParserState s => Alternative (Parser s) where
---     empty = Parser $ \s -> (Nothing, s)
---
---     p <|> q =
---
---     p <|> q = Parser $ \s -> let (m1, s1) = runParser p s
---                              in either (\_ -> let (m2, s2) = runParser q s
---                                               in either (\_ -> if s1 > s2
---                                                                then (m1, s1)
---                                                                else (m2, s2))
---                                                          (\b -> (Right b, s2)) m2)
---                                        (\a -> (Right a, s1)) m1
---
--- instance ParserState s => MonadPlus (Parser s)
---
---
--- class Ord a => ParserState a where
---     pop :: a -> (b, a)
---     null :: a -> Bool
---
---
--- sat :: ParserState s => (b -> Bool) -> Parser s b
--- sat f = Parser $ \s -> if null s
---                        then (Left "No Input", s)
---                        else let (b, s') = pop s
---                             in if f b
---                                then (Right b, s')
-                            --    else (Left "", s)
-
--- sat f = Parser $ \s@(ParserState xs (i, j)) -> case xs of
---                      ""               -> (Left NoInput, s)
---                      c:cs | f c       -> (pure c, ParserState cs (i, j + 1))
---                           | otherwise -> (Left UnusableChar, s)
-
-
--- fail :: String -> Parser s a
--- fail e = Parser $ \s -> (Left e, s)
-
 
 --------------------------------------------------------------------------------
-
-
 data ParseOption = Infix Int String
                  | Infixl Int String
                  | Infixr Int String
@@ -90,7 +23,7 @@ instance Show ParseOption where
     show (Infixf i s) = "infixf " ++ show i ++ " " ++ s
     show (DataCons s)  = "data " ++ s
 
-
+--------------------------------------------------------------------------------
 data Expr = Var String
           | Bytes Integer
           | Cons String [Expr]
@@ -123,24 +56,56 @@ emap f (Env a r)    = Env (f a) r
 emap f a            = a
 
 
-data Envir = Envir Envir [Expr]
-           | RootEnvir
+--------------------------------------------------------------------------------
+data Memory a = Node Ref Int a (Memory a) (Memory a)
+              | Leaf
+
+instance Show a => Show (Memory a) where
+    show Leaf = ""
+    show (Node _ _ a l r) = "(" ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
+
+instance Functor Memory where
+    _ `fmap` Leaf = Leaf
+    f `fmap` Node i j a l r = Node i j (f a) (f `fmap` l) (f `fmap` r)
 
 
-type Memory a = M.IntMap a
-type Ref = M.Key
+type Ref = Int
 
-newMemory :: Memory a -> a -> Memory a
-newMemory m a = M.insert (M.size m) a m
+rootRef :: Ref
+rootRef = shift (maxBound :: Int) (-1) + 1
 
-readMemory :: Memory a -> Ref -> a
-readMemory = (M.!)
 
-writeMemory :: Memory a -> Ref -> a -> Memory a
-writeMemory m r a = M.insert r a m
+memory :: Memory a
+memory = Leaf
 
-modifyMemory :: Memory a -> Ref -> (a -> a) -> Memory a
-modifyMemory m r f = M.adjust f r m
+fromList :: [a] -> Memory a
+fromList = foldr (\a m -> fst $ new a m) memory
+
+new :: a -> Memory a -> (Memory a, Ref)
+new = add rootRef
+    where
+        add :: Ref -> a -> Memory a -> (Memory a, Ref)
+        add ref a Leaf = (Node ref (- shift ref (-1)) a Leaf Leaf, ref)
+        add _ a (Node i j b l r) = if j < 0
+            then let (m, ref) = add (i + j) a l
+                 in (Node i (-j) b m r, ref)
+            else let (m, ref) = add (i + j) a r
+                 in (Node i (-j) b l m, ref)
+
+-- type Memory a = M.IntMap a
+-- type Ref = M.Key
+--
+-- newMemory :: Memory a -> a -> Memory a
+-- newMemory m a = M.insert (M.size m) a m
+--
+-- readMemory :: Memory a -> Ref -> a
+-- readMemory = (M.!)
+--
+-- writeMemory :: Memory a -> Ref -> a -> Memory a
+-- writeMemory m r a = M.insert r a m
+--
+-- modifyMemory :: Memory a -> Ref -> (a -> a) -> Memory a
+-- modifyMemory m r f = M.adjust f r m
 
 
 --
