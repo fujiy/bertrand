@@ -247,7 +247,7 @@ declaration :: OpeParser
 declaration p = f <$> p <*> option (sign "!" *> ((:) <$> declaration p <*> many (sign ";" *> declaration p)))
     where
         f a Nothing   = a
-        f a (Just ds) = Decl a ds
+        f a (Just ds) = Decl ds a
 
 applicate :: [String] -> OpeParser
 applicate ss p = foldl App <$> termop ss p <*> many (term ss p)

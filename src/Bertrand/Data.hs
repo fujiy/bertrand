@@ -2,7 +2,7 @@
 module Bertrand.Data
     ( Expr(..), emap
     , ParseOption(..)
-    , Memory, Ref, memory, new, fromList
+    , Memory, Ref, memory, singleton, fromList, newMemory, readMemory, writeMemory
     ) where
 
 
@@ -31,8 +31,8 @@ data Expr = Var String
           | Lambda Expr Expr
           | Bind String Expr
           | Comma [Expr]
-          | Decl Expr [Expr]
-          | Env Expr Ref
+          | Decl [Expr] Expr
+          | Env Ref Expr
 
 instance Show Expr where
     show (Var s)      = s
@@ -42,8 +42,8 @@ instance Show Expr where
     show (Lambda a b) = "(\\" ++ show a ++ " -> " ++ show b ++ ")"
     show (Bind a b)   = a ++ " = " ++ show b
     show (Comma as)   = "(" ++ intercalate ", " (map show as) ++ ")"
-    show (Decl a as)  = "(" ++ show a ++ " ! " ++ intercalate "; " (map show as) ++ ")"
-    show (Env a r)    = "*" ++ show a
+    show (Decl ds a)  = "(" ++ show a ++ " ! " ++ intercalate "; " (map show ds) ++ ")"
+    show (Env r a)    = "*" ++ show a
 
 emap :: (Expr -> Expr) -> Expr -> Expr
 emap f (Cons s as)  = Cons s (map f as)
@@ -51,8 +51,8 @@ emap f (App a b)    = App (f a) (f b)
 emap f (Lambda a b) = Lambda (f a) (f b)
 emap f (Bind s a)   = Bind s (f a)
 emap f (Comma as)   = Comma (map f as)
-emap f (Decl a ds)  = Decl (f a) (map f ds)
-emap f (Env a r)    = Env (f a) r
+emap f (Decl ds a)  = Decl (map f ds) (f a)
+emap f (Env r a)    = Env r (f a)
 emap f a            = a
 
 
@@ -62,7 +62,7 @@ data Memory a = Node Ref Int a (Memory a) (Memory a)
 
 instance Show a => Show (Memory a) where
     show Leaf = ""
-    show (Node _ _ a l r) = "(" ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
+    show (Node i _ a l r) = "(" ++ show i ++ " " ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
 
 instance Functor Memory where
     _ `fmap` Leaf = Leaf
@@ -78,11 +78,14 @@ rootRef = shift (maxBound :: Int) (-1) + 1
 memory :: Memory a
 memory = Leaf
 
-fromList :: [a] -> Memory a
-fromList = foldr (\a m -> fst $ new a m) memory
+singleton :: a -> (Memory a, Ref)
+singleton a = newMemory a memory
 
-new :: a -> Memory a -> (Memory a, Ref)
-new = add rootRef
+fromList :: [a] -> Memory a
+fromList = foldr (\a m -> fst $ newMemory a m) memory
+
+newMemory :: a -> Memory a -> (Memory a, Ref)
+newMemory = add rootRef
     where
         add :: Ref -> a -> Memory a -> (Memory a, Ref)
         add ref a Leaf = (Node ref (- shift ref (-1)) a Leaf Leaf, ref)
@@ -92,8 +95,18 @@ new = add rootRef
             else let (m, ref) = add (i + j) a r
                  in (Node i (-j) b l m, ref)
 
--- type Memory a = M.IntMap a
--- type Ref = M.Key
+readMemory :: Ref -> Memory a -> a
+readMemory ref (Node i _ a l r)
+    | ref == i  = a
+    | ref <  i  = readMemory ref l
+    | otherwise = readMemory ref r
+
+writeMemory :: (a -> a) -> Ref -> Memory a -> Memory a
+writeMemory f ref (Node i j a l r)
+    | ref == i  = Node i j (f a) l r
+    | ref <  i  = Node i j a (writeMemory f ref l) r
+    | otherwise = Node i j a l (writeMemory f ref r)
+
 --
 -- newMemory :: Memory a -> a -> Memory a
 -- newMemory m a = M.insert (M.size m) a m

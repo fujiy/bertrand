@@ -55,7 +55,7 @@ roop = do
                   (s,  _) -> do
                       m <- parseS $ init s
                       REPLST es _ <- get
-                      maybe (return ()) (\e -> io $ putStrLn $ eval (Decl e es)) m
+                      maybe (return ()) (io . putStrLn . eval . Decl (fst prelude) . Decl es) m
               roop
 
 
