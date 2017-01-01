@@ -119,8 +119,8 @@ parser :: [ParseOption] -> Parser Expr
 parser ops = toCons ops <$> expr <* eof
     where
         expr :: Parser Expr
-        expr = foldr id (applicate signs expr) opeparsers
-        -- expr = applicate $ head opeparsers $ term expr
+        expr = foldr id (apply signs expr) opeparsers
+        -- expr = apply $ head opeparsers $ term expr
 
 
         opeparsers :: [OpeParser]
@@ -249,8 +249,8 @@ declaration p = f <$> p <*> option (sign "!" *> ((:) <$> declaration p <*> many 
         f a Nothing   = a
         f a (Just ds) = Decl ds a
 
-applicate :: [String] -> OpeParser
-applicate ss p = foldl App <$> termop ss p <*> many (term ss p)
+apply :: [String] -> OpeParser
+apply ss p = foldl App <$> termop ss p <*> many (term ss p)
 
 termop :: [String] -> OpeParser
 termop ss p = term ss p <|> operator ss
@@ -260,6 +260,7 @@ term ss p = sign "(" *> p <* sign ")"
         <|> (identifier >>= f)
         <|> float
         <|> number
+        <|> systemVar
         <|> Var <$> (sign "()" <|> sign "[]")
     where
         f (Var s) | s `elem` ss = mzero
@@ -272,13 +273,19 @@ identifier :: Parser Expr
 identifier = Var <$> token (((:) <$> letter <*> many (letter <|> digit))
                             <|> some symbol)
 
+systemVar :: Parser Expr
+systemVar = (`Cons` []) <$> token ((:) <$> char '#' <*> many letter)
+
 float :: Parser Expr
 float = toFraction <$> (spaces *> some digit) <* char '.' <*> some digit
     where
-        toFraction xs ys = Cons "/" [Bytes . read $ xs ++ ys, Bytes $ 10 ^ length ys]
+        toFraction xs ys = Cons "/" [int . read $ xs ++ ys, int $ 10 ^ length ys]
 
 number :: Parser Expr
-number = Bytes . read <$> (spaces *> some digit)
+number = int . read <$> (spaces *> some digit)
+
+int :: Integer -> Expr
+int i = Cons "_Int" [Bytes i]
 
 sign :: String -> Parser String
 sign s = token $ string s
@@ -293,7 +300,7 @@ letter :: Parser Char
 letter = sat isLetter
 
 symbol :: Parser Char
-symbol = oneof char "!#$%&*+./<=>?@\\^|-~:"
+symbol = oneof char "!$%&*+./<=>?@\\^|-~:"
 
 spaces :: Parser String
 spaces = many space
@@ -318,12 +325,3 @@ oneof p = foldl (\q a -> q <|> p a) mzero
 
 -- or :: (a -> Bool) -> (a -> Bool) -> a -> Bool
 -- f `or` g = \a -> f a || g a
-
-notf :: (a -> Bool) -> a -> Bool
-notf f = not . f
-
-andf :: (a -> Bool) -> (a -> Bool) -> a -> Bool
-andf f g a = f a && g a
-
-orf :: (a -> Bool) -> (a -> Bool) -> a -> Bool
-orf f g a = f a || g a

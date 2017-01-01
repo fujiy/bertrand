@@ -3,11 +3,14 @@ module Bertrand.Data
     ( Expr(..), emap
     , ParseOption(..)
     , Memory, Ref, memory, singleton, fromList, newMemory, readMemory, writeMemory
+    -- , notf, andf, orf
     ) where
 
 
 import Data.Bits
 import Data.List
+
+import Debug.Trace
 
 --------------------------------------------------------------------------------
 data ParseOption = Infix Int String
@@ -21,7 +24,7 @@ instance Show ParseOption where
     show (Infixl i s) = "infixl " ++ show i ++ " " ++ s
     show (Infixr i s) = "infixr " ++ show i ++ " " ++ s
     show (Infixf i s) = "infixf " ++ show i ++ " " ++ s
-    show (DataCons s)  = "data " ++ s
+    show (DataCons s) = "data " ++ s
 
 --------------------------------------------------------------------------------
 data Expr = Var String
@@ -33,10 +36,11 @@ data Expr = Var String
           | Comma [Expr]
           | Decl [Expr] Expr
           | Env Ref Expr
+    deriving Eq
 
 instance Show Expr where
     show (Var s)      = s
-    show (Bytes i)    = '#':show i
+    show (Bytes i)    = show i
     show (Cons s es)  = "[" ++ s ++ " " ++ unwords (map show es) ++ "]"
     show (App a b)    = "(" ++ show a ++ " " ++ show b ++ ")"
     show (Lambda a b) = "(\\" ++ show a ++ " -> " ++ show b ++ ")"
@@ -52,7 +56,7 @@ emap f (Lambda a b) = Lambda (f a) (f b)
 emap f (Bind s a)   = Bind s (f a)
 emap f (Comma as)   = Comma (map f as)
 emap f (Decl ds a)  = Decl (map f ds) (f a)
-emap f (Env r a)    = Env r (f a)
+emap f (Env r a)    = Env r (emap f a)
 emap f a            = a
 
 
@@ -62,7 +66,8 @@ data Memory a = Node Ref Int a (Memory a) (Memory a)
 
 instance Show a => Show (Memory a) where
     show Leaf = ""
-    show (Node i _ a l r) = "(" ++ show i ++ " " ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
+    -- show (Node i _ a l r) = "(" ++ show i ++ " " ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
+    show (Node i _ a l r) = "(" ++ show i ++ show l ++ " " ++ show r ++ ")"
 
 instance Functor Memory where
     _ `fmap` Leaf = Leaf
@@ -72,7 +77,8 @@ instance Functor Memory where
 type Ref = Int
 
 rootRef :: Ref
-rootRef = shift (maxBound :: Int) (-1) + 1
+-- rootRef = shift (maxBound :: Int) (-1) + 1
+rootRef = 0x10000
 
 
 memory :: Memory a
@@ -85,17 +91,19 @@ fromList :: [a] -> Memory a
 fromList = foldr (\a m -> fst $ newMemory a m) memory
 
 newMemory :: a -> Memory a -> (Memory a, Ref)
-newMemory = add rootRef
+newMemory = add rootRef (- shift rootRef (-1))
     where
-        add :: Ref -> a -> Memory a -> (Memory a, Ref)
-        add ref a Leaf = (Node ref (- shift ref (-1)) a Leaf Leaf, ref)
-        add _ a (Node i j b l r) = if j < 0
-            then let (m, ref) = add (i + j) a l
+        add :: Ref -> Ref -> a -> Memory a -> (Memory a, Ref)
+        add i j a Leaf = (Node i j a Leaf Leaf, i)
+        add _ _ a (Node i j b l r) =
+            if j < 0
+            then let (m, ref) = add (i + j) (shift j (-1)) a l
                  in (Node i (-j) b m r, ref)
-            else let (m, ref) = add (i + j) a r
+            else let (m, ref) = add (i + j) (- shift j (-1)) a r
                  in (Node i (-j) b l m, ref)
 
 readMemory :: Ref -> Memory a -> a
+readMemory ref Leaf = error $ show ref
 readMemory ref (Node i _ a l r)
     | ref == i  = a
     | ref <  i  = readMemory ref l
@@ -107,7 +115,17 @@ writeMemory f ref (Node i j a l r)
     | ref <  i  = Node i j a (writeMemory f ref l) r
     | otherwise = Node i j a l (writeMemory f ref r)
 
---
+--------------------------------------------------------------------------------
+
+notf :: (a -> Bool) -> a -> Bool
+notf f = not . f
+
+andf :: (a -> Bool) -> (a -> Bool) -> a -> Bool
+andf f g a = f a && g a
+
+orf :: (a -> Bool) -> (a -> Bool) -> a -> Bool
+orf f g a = f a || g a
+
 -- newMemory :: Memory a -> a -> Memory a
 -- newMemory m a = M.insert (M.size m) a m
 --

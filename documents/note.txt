@@ -27,3 +27,8 @@ a + b + c
 
 a < b < c
 a < b and b < c
+
+
+(\x -> x) 1
+
+x ! x = 1

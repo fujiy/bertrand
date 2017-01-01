@@ -55,7 +55,7 @@ roop = do
                   (s,  _) -> do
                       m <- parseS $ init s
                       REPLST es _ <- get
-                      maybe (return ()) (io . putStrLn . eval . Decl (fst prelude) . Decl es) m
+                      maybe (return ()) (io . putStrLn . evalShow . Decl (fst prelude) . Decl es) m
               roop
 
 
@@ -136,7 +136,9 @@ prelude = let (s, ops) = preprocess code
             "data :",
             "data ()",
             "data []",
-            "true"
+            "data Id",
+            "true",
+            "id x = x"
             ]
 
 --------------------------------------------------------------------------------
