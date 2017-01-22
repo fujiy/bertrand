@@ -92,12 +92,12 @@ evalShow :: Expr -> String
 evalShow = let (m, ref) = singleton Root
            in show . interpret (\e -> do
                a <- envir ref e
+               evalTo ref a) m
             --    traceShow a return ()
-               as <- repeatM (evalStep ref) 5 a
-               return $ trace (unlines $ map show $ init as) last as) m
+            --    as <- repeatM (evalStep ref) 5 a
+            --    return $ trace (unlines $ map show $ init as) last as) m
 
            --
-
 
 envir :: Evaluator Expr Expr
 envir r (Decl [] a) = envir r a
@@ -113,6 +113,13 @@ envir r a = emapM (envir r) a
 
 toBinds :: [Expr] -> Binds
 toBinds = foldr (\(Bind s a) -> Map.insertWith (++) s [a]) Map.empty
+
+evalTo :: Evaluator Expr Expr
+evalTo r e = traceShow e $ do
+    e' <- evalStep r e
+    if e == e'
+    then return e
+    else evalTo r e'
 
 evalStep :: Evaluator Expr Expr
 -- eval r (Var s)
@@ -140,6 +147,7 @@ evalStep r e = case e of
     Env ref a | r == ref  -> evalStep ref a
               | otherwise -> Env ref <$> evalStep ref a
 
+    Cons ('#':s) es -> systemF s <$> mapM (evalTo r) es
     Cons s es -> Cons s <$> mapM (evalStep r) es
 
     Comma [e] -> evalStep r e
@@ -197,8 +205,8 @@ evalStep r e = case e of
                                         a' = Env re a
                                         b' = Env rx b
                                     in do
-                                        aimpb <- isJust <$> implicate r (a', b')
-                                        bimpa <- isJust <$> implicate r (b', a')
+                                        aimpb <- isJust <$> imply r (a', b')
+                                        bimpa <- isJust <$> imply r (b', a')
                                         return $ case (aimpb, bimpa) of
                                             (True,  True)  -> (t:xs, ys, zs, ws)
                                             (False, False) -> (xs, t:ys, zs, ws)
@@ -212,24 +220,7 @@ evalStep r e = case e of
                             then (++ ys) <$> mapM (\(Node z zs') -> Node z <$> addForest r (zs', e)) zs
                             else return $ Node e ws : ys
 
-                            --
-                            --
-                            -- (xs, ys) <- partitionM (\(Node x _) ->
-                            --     let (rx, Lambda b _) = detachRef r x
-                            --     in isJust <$> implicate r (Env re a, Env rx b)) ts
-                            -- if null xs
-                            -- then return $ Node e [] : ts
-                            -- else (++ ys) <$> mapM (\(Node x ts') -> Node x <$> f ts' e) xs
                         _ -> return ts
-
-        -- lambdaTree' :: [Expr] -> Forest Expr
-        -- lambdaTree = map (`Node` [])
-        -- lambdaTree es = let as = map (`Node` []) es
-        --                 in trace (drawForest $ map (fmap show) as) as
-        -- lambdaTree' = foldr (\e es -> Node e []:es) []
-        --     where
-        --         f :: Expr -> Forest Expr -> Forest Expr
-        --         f = undefined
 
         applyTree :: Evaluator (Forest Expr, Expr) [Expr]
         applyTree r (xs, e) = concat <$> mapM
@@ -256,7 +247,7 @@ evalStep r e = case e of
 
         match :: Evaluator (Expr, Expr) (Maybe (Maybe Ref))
         match r t = do
-            m <- implicate r (swap t)
+            m <- imply r (swap t)
             maybe (return Nothing) (\es ->
                 case es of
                     [] -> return $ Just Nothing
@@ -265,23 +256,24 @@ evalStep r e = case e of
                         return $ Just $ Just r'
                   ) m
 
-        implicate :: Evaluator (Expr, Expr) (Maybe [Expr])
-        implicate r t = let
+        -- a => b, a ⊆ b
+        imply :: Evaluator (Expr, Expr) (Maybe [Expr])
+        imply r t = let
             (a, b) = t
-            (ra, a') = detachRef r a
-            (rb, b') = detachRef r b
+            (fa, a') = detachEnv a
+            (fb, b') = detachEnv b
             in case (a', b') of
             (_, App _ _) -> do
-                (rb', b'') <- detachRef r <$> evalTillTerm r b
+                (fb, b'') <- detachEnv <$> evalTo r b
                 case b'' of
                     App _ _ -> return Nothing
-                    _       -> implicate r (b'', a)
+                    _       -> imply r (a, fb b'')
 
             (_, Cons xs bs) -> do
-                (ra', a'') <- detachRef r <$> evalTillCons r a
+                (fa', a'') <- detachEnv <$> evalTillCons r a
                 case a'' of
                     Cons ys as | xs == ys && length as == length bs -> do
-                        ms <- mapM (implicate r) $ zip (map (Env rb) bs) (map (Env ra') as)
+                        ms <- mapM (imply r) $ zip (map fa' as) (map fb bs)
                         if Nothing `elem` ms
                         then return Nothing
                         else return $ Just $ concat $ catMaybes ms
@@ -290,11 +282,12 @@ evalStep r e = case e of
             (Bytes i, Bytes j) | i == j -> return $ Just []
 
             (_, Comma bs) -> do
-                ms <- mapM (implicate r . (, a) . Env rb) bs
+                ms <- mapM (imply r . (, a) . fb) bs
                 if any isJust ms
                 then return $ Just $ concat $ catMaybes ms
                 else return Nothing
 
+            (_, Var "_") -> return $ Just []
             (_, Var s) -> return $ Just [Bind s a]
 
             (x, y) -> trace ("failed:" ++ show (x, y)) return Nothing
@@ -352,8 +345,19 @@ evalStep r e = case e of
         exprs (Env r a)  = Env r <$> exprs a
         exprs a          = [a]
 
-    --     bindsTree :: [Expr] -> Tree Expr
-    --     bindsTree = Node
+        systemF :: String -> [Expr] -> Expr
+        systemF s [a, b] | s `elem` ss =
+            case (snd $ detachEnv a, snd $ detachEnv b) of
+                (Cons "_Int" [Bytes i], Cons "_Int" [Bytes j])
+                               -> Cons "_Int" [Bytes $ (fromJust $ lookup s fs) i j]
+                (Comma as, b') -> Comma $ map (\a' -> systemF s [a', b']) as
+                (a', Comma bs) -> Comma $ map (\b' -> systemF s [a', b']) bs
+                _              -> Comma []
+            where
+                ss = map fst fs
+                fs = [("intplus", (+)), ("intminus", (-)), ("intmultiply", (*))]
+
+        systemF s es = Cons ('#':s) es
 
 envirs :: Interpreter Ref [(Ref, Envir)]
 envirs r = read r >>= \e -> case e of

@@ -177,6 +177,9 @@ prelude = let (s, ops) = preprocess code
             "data ()",
             "data []",
             "data Id",
+            "(+) = #intplus",
+            "(-) = #intminus",
+            "(*) = #intmultiply",
             "true",
             "id x = x"
             ]
