@@ -84,11 +84,12 @@ shell sd s = void $ runShell sh sd s
                                       ($ tail [])
                                       (lookup "help" $ commands sd)
                                 roop
-                            "quit":_ -> outputStrLn $ quitText $ style sd
+                            s:_ | s `isPrefixOf` "quit"
+                               -> outputStrLn $ quitText $ style sd
                             xs -> do
                                 maybe (outputStrLn "unknown command")
                                       (\(_,f) -> f $ tail xs)
-                                      (find (\(s,_) -> s == head xs) (commands sd))
+                                      (find (\(s,_) -> head xs `isPrefixOf` s) (commands sd))
                                 roop
                 Just cs -> do
                     evalFunc sd cs
