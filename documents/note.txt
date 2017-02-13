@@ -32,3 +32,15 @@ a < b and b < c
 (\x -> x) 1
 
 x ! x = 1
+
+
+id (id 2)
+(\x -> x) (id 2)
+x  !  x = id 2
+id 2  !  x = id 2
+(\x -> x) 2  !  x = id 2
+
+
+Issues
+
+    Interpreterをエラー対応型に

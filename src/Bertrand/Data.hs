@@ -1,14 +1,17 @@
 
 module Bertrand.Data
-    ( Expr(..), emap
+    ( Expr(..),  emap
+    , Envir(..), eempty, fmapE
+    , Binds,     findBind
     , ParseOption(..)
-    , Memory, Ref, memory, singleton, fromList, newMemory, readMemory, writeMemory
+    -- , Memory, Ref, memory, singleton, fromList, newMemory, readMemory, writeMemory
     -- , notf, andf, orf
     ) where
 
 
 import Data.Bits
 import Data.List
+import qualified Data.Map as Map
 
 import Debug.Trace
 
@@ -27,93 +30,123 @@ instance Show ParseOption where
     show (DataCons s) = "data " ++ s
 
 --------------------------------------------------------------------------------
+data Envir = Envir [Expr] Binds
+    deriving Eq
+
+instance Show Envir where
+    show (Envir _ bs) = show $ Map.toList bs
+
+type Binds = Map.Map String [Expr]
+
+eempty :: Envir
+eempty = Envir [] mempty
+
+findBind :: String -> Binds -> [Expr]
+findBind = Map.findWithDefault []
+
+fmapE :: (Expr -> Expr) -> Envir -> Envir
+fmapE f (Envir as bs) = Envir (fmap f as) (fmap (map f) bs)
+
+-- instance Monoid Envir where
+--     mempty = Envir []
+--     Envir xs `mappend` Envir ys = Envir (xs ++ ys)
+
+
+-- declares :: Envir -> [Expr]
+-- declares  Root        = []
+-- declares (Envir es _) = es
+-- binds :: Envir -> Binds
+-- binds     Root        = Map.empty
+-- binds    (Envir _ bs) = bs
+
+--------------------------------------------------------------------------------
 data Expr = Var String
-          | Bytes Integer
-          | Cons String [Expr]
+          | Const String [Expr]
           | App Expr Expr
           | Lambda Expr Expr
           | Bind String Expr
           | Comma [Expr]
+          | Env (Int, Envir) Expr
           | Decl [Expr] Expr
-          | Env Ref Expr
     deriving Eq
 
 instance Show Expr where
-    show (Var s)      = s
-    show (Bytes i)    = show i
-    show (Cons s es)  = "[" ++ s ++ " " ++ unwords (map show es) ++ "]"
-    show (App a b)    = "(" ++ show a ++ " " ++ show b ++ ")"
-    show (Lambda a b) = "(\\" ++ show a ++ " -> " ++ show b ++ ")"
-    show (Bind a b)   = a ++ " = " ++ show b
-    show (Comma as)   = "(" ++ intercalate ", " (map show as) ++ ")"
-    show (Decl ds a)  = "(" ++ show a ++ " ! " ++ intercalate "; " (map show ds) ++ ")"
-    show (Env r a)    = "*" ++ show a
+    show (Var s)        = s
+    show (Const s [])   = '\'' : s
+    show (Const s es)   = "('" ++ s ++ " " ++ unwords (map show es) ++ ")"
+    show (App a b)      = "(" ++ show a ++ " " ++ show b ++ ")"
+    show (Lambda a b)   = "(\\" ++ show a ++ " -> " ++ show b ++ ")"
+    show (Bind a b)     = a ++ " = " ++ show b
+    show (Comma as)     = "(" ++ intercalate ", " (map show as) ++ ")"
+    show (Decl ds a)    = "(" ++ show a ++ " !! " ++ intercalate "; " (map show ds) ++ ")"
+    -- show (Env (i, e) a) = "(" ++ show a ++ " ! " ++ show i ++ show e ++ ")"
+    show (Env (i, e) a) = show a
 
 emap :: (Expr -> Expr) -> Expr -> Expr
-emap f (Cons s as)  = Cons s (map f as)
+emap f (Const s es) = Const s (map f es)
 emap f (App a b)    = App (f a) (f b)
 emap f (Lambda a b) = Lambda (f a) (f b)
 emap f (Bind s a)   = Bind s (f a)
 emap f (Comma as)   = Comma (map f as)
 emap f (Decl ds a)  = Decl (map f ds) (f a)
-emap f (Env r a)    = Env r (emap f a)
+emap f (Env t a)    = Env t (emap f a)
 emap f a            = a
 
 
 --------------------------------------------------------------------------------
-data Memory a = Node Ref Int a (Memory a) (Memory a)
-              | Leaf
-
-instance Show a => Show (Memory a) where
-    show Leaf = ""
-    -- show (Node i _ a l r) = "(" ++ show i ++ " " ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
-    show (Node i _ a l r) = "(" ++ show i ++ show l ++ " " ++ show r ++ ")"
-
-instance Functor Memory where
-    _ `fmap` Leaf = Leaf
-    f `fmap` Node i j a l r = Node i j (f a) (f `fmap` l) (f `fmap` r)
-
-
-type Ref = Int
-
-rootRef :: Ref
--- rootRef = shift (maxBound :: Int) (-1) + 1
-rootRef = 0x10000
-
-
-memory :: Memory a
-memory = Leaf
-
-singleton :: a -> (Memory a, Ref)
-singleton a = newMemory a memory
-
-fromList :: [a] -> Memory a
-fromList = foldr (\a m -> fst $ newMemory a m) memory
-
-newMemory :: a -> Memory a -> (Memory a, Ref)
-newMemory = add rootRef (- shift rootRef (-1))
-    where
-        add :: Ref -> Ref -> a -> Memory a -> (Memory a, Ref)
-        add i j a Leaf = (Node i j a Leaf Leaf, i)
-        add _ _ a (Node i j b l r) =
-            if j < 0
-            then let (m, ref) = add (i + j) (shift j (-1)) a l
-                 in (Node i (-j) b m r, ref)
-            else let (m, ref) = add (i + j) (- shift j (-1)) a r
-                 in (Node i (-j) b l m, ref)
-
-readMemory :: Ref -> Memory a -> a
-readMemory ref Leaf = error $ show ref
-readMemory ref (Node i _ a l r)
-    | ref == i  = a
-    | ref <  i  = readMemory ref l
-    | otherwise = readMemory ref r
-
-writeMemory :: (a -> a) -> Ref -> Memory a -> Memory a
-writeMemory f ref (Node i j a l r)
-    | ref == i  = Node i j (f a) l r
-    | ref <  i  = Node i j a (writeMemory f ref l) r
-    | otherwise = Node i j a l (writeMemory f ref r)
+-- data Memory a = Node Ref Int a (Memory a) (Memory a)
+--               | Leaf
+--
+-- instance Show a => Show (Memory a) where
+--     show Leaf = ""
+--     show (Node i _ a l r) = "(" ++ show i ++ " " ++ show a ++ " " ++ show l ++ " " ++ show r ++ ")"
+--     -- show (Node i _ a l r) = "(" ++ show i ++ show l ++ " " ++ show r ++ ")"
+--
+-- instance Functor Memory where
+--     _ `fmap` Leaf = Leaf
+--     f `fmap` Node i j a l r = Node i j (f a) (f `fmap` l) (f `fmap` r)
+--
+--
+-- type Ref = Int
+--
+-- rootRef :: Ref
+-- -- rootRef = shift (maxBound :: Int) (-1) + 1
+-- rootRef = 0x10000
+--
+--
+-- memory :: Memory a
+-- memory = Leaf
+--
+-- singleton :: a -> (Memory a, Ref)
+-- singleton a = newMemory a memory
+--
+-- fromList :: [a] -> Memory a
+-- fromList = foldr (\a m -> fst $ newMemory a m) memory
+--
+-- newMemory :: a -> Memory a -> (Memory a, Ref)
+-- newMemory = add rootRef (- shift rootRef (-1))
+--     where
+--         add :: Ref -> Ref -> a -> Memory a -> (Memory a, Ref)
+--         add i j a Leaf = (Node i j a Leaf Leaf, i)
+--         add _ _ a (Node i j b l r) =
+--             if j < 0
+--             then let (m, ref) = add (i + j) (shift j (-1)) a l
+--                  in (Node i (-j) b m r, ref)
+--             else let (m, ref) = add (i + j) (- shift j (-1)) a r
+--                  in (Node i (-j) b l m, ref)
+--
+-- readMemory :: Ref -> Memory a -> a
+-- readMemory ref Leaf = error $ show ref
+-- readMemory ref (Node i _ a l r)
+--     | ref == i  = a
+--     | ref <  i  = readMemory ref l
+--     | otherwise = readMemory ref r
+--
+-- writeMemory :: (a -> a) -> Ref -> Memory a -> Memory a
+-- writeMemory f ref (Node i j a l r)
+--     | ref == i  = Node i j (f a) l r
+--     | ref <  i  = Node i j a (writeMemory f ref l) r
+--     | otherwise = Node i j a l (writeMemory f ref r)
 
 --------------------------------------------------------------------------------
 

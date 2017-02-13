@@ -45,6 +45,7 @@ cmds = [("help",    const $ outputStrLn helptext),
         ]
 
 evalF :: String -> Shell REPLST ()
+evalF "" = return ()
 evalF xs = let c = last xs in
            if c == '.'
            then case preprocess (init xs) of
@@ -159,44 +160,72 @@ prelude :: ([Expr], [ParseOption])
 prelude = let (s, ops) = preprocess code
           in (rights $ map (parse ops) $ lines s, ops)
     where
-        code = unlines [
-            "infixr 0 $",
-            "infixr 2 or",
-            "infixr 3 and",
-            "infixf 4 ==",
-            "infixf 4 /=",
-            "infixr 5 :",
-            "infixr 5 ++",
-            "infixl 6 +",
-            "infixl 6 -",
-            "infixl 7 *",
-            "infixl 7 /",
-            "infixl 9 .",
-            "data /",
-            "data :",
-            "data ()",
-            "data []",
-            "data Id",
-            "(+) = #intplus",
-            "(-) = #intminus",
-            "(*) = #intmultiply",
-            "true",
-            "id x = x"
-            ]
+        code =
+            "\n infixr 0 $ \
+            \\n infixr 2 or \
+            \\n infixr 3 and \
+            \\n infixf 4 == \
+            \\n infixf 4 /= \
+            \\n infixr 5 : \
+            \\n infixr 5 ++ \
+            \\n infixl 6 + \
+            \\n infixl 6 - \
+            \\n infixl 7 * \
+            \\n infixl 7 / \
+            \\n infixl 9 . \
+
+            \\n data / \
+            \\n data : \
+            \\n data [] \
+            \\n data Id \
+
+            \\n (+) = #intplus \
+            \\n (-) = #intminus \
+            \\n (*) = #intmultiply \
+
+            \\n true \
+            \\n id x = x \
+            \\n const x _ = x \
+            \\n f $ x = f x \
+
+            \\n head (x:_) = x \
+            \\n tail (_:xs) = xs \
+            \\n last (x:[]) = x \
+            \\n last (_:xs) = last xs \
+            \\n init (x:_:[]) = [x] \
+            \\n init (x:xs)   = x : init xs \
+            \\n null [] = true \
+            \\n null xs = false \
+            \\n length []     = 0 \
+            \\n length (_:xs) = length xs + 1 \
+            \\n []     ++ ys = ys \
+            \\n (x:xs) ++ ys = x:(xs ++ ys) \
+            \\n map _ []     = [] \
+            \\n map f (x:xs) = f x : map f xs \
+            \\n foldl f a []     = a \
+            \\n foldl f a (x:xs) = foldl f (f a x) xs \
+            \\n foldr f z []     = z \
+            \\n foldr f z (x:xs) = f x (foldr f z xs) \
+            \\n concat = foldr (++) [] \
+            \\n take _ []     = [] \
+            \\n take 0 _      = [] \
+            \\n take i (x:xs) = x : take (i - 1) xs \
+            \\n drop _ []     = [] \
+            \\n drop 0 xs     = xs \
+            \\n drop i (_:xs) = drop (i - 1) xs \
+
+            \"
 
 --------------------------------------------------------------------------------
 
 helptext :: String
-helptext = unlines [
-    " Commands available from the prompt:",
-    "",
-    "   <expr>         evaluate and display <expr>",
-    "   <expr> .       declare that <expr> is true",
-    "   <expr> ?       display <expr> is true, false or undefined",
-    "   :clear         clear all declarations",
-    "   :help, :?      display this list of commands",
-    -- "   :i             display all declarations",
-    -- "   :i <expr>      display all declarations about <expr>",
-    "   :options       display all parse options",
-    "   :quit          exit Bertrand Interpreter"
-    ]
+helptext =
+    " Commands available from the prompt:\n\
+    \\n\
+    \   <expr>         evaluate and display <expr>\n\
+    \   <expr> .       declare that <expr> is true\n\
+    \   <expr> ?       display <expr> is true, false or undefined\n\
+    \   :clear         clear all declarations\n\
+    \   :help, :?      display this list of commands\n\
+    \   :options       display all parse options\n\
+    \   :quit          exit Bertrand Interpreter"

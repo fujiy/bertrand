@@ -27,6 +27,7 @@ library
                      , containers
                      , transformers
                      , extra
+                     , monad-loops
                      , haskeline
   default-language:    Haskell2010
 
