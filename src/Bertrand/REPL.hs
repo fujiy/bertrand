@@ -46,68 +46,27 @@ cmds = [("help",    const $ outputStrLn helptext),
 
 evalF :: String -> Shell REPLST ()
 evalF "" = return ()
-evalF xs = let c = last xs in
-           if c == '.'
-           then case preprocess (init xs) of
-               ("", op) -> modify (`mappend` REPLST [] op)
-               (s,  _)  -> do
-                   m <- parseS $ init s
-                   maybe (return ())
-                         (\e -> modify (`mappend` REPLST [e] [])) m
-           else case preprocess xs of
-               ("", _) -> return ()
-               (s,  _) -> do
-                   m <- parseS $ init s
-                   REPLST es _ <- get
-                   maybe (return ())
-                         (outputStrLn . evalShow . Decl (fst prelude) . Decl es) m
-
--- repl :: IO ()
--- repl = do
---     putStrLn "Hello!  Bertrand, ver.0.1   :? for help"
---
---     runStateT roop mempty
---
---     putStrLn "See you!"
-
--- type REPL a = StateT REPLST IO a
-
--- io :: IO a -> REPL a
--- io = liftIO
---
--- roop :: REPL ()
--- roop = do
---     io $ putStr "main> "
---     io $ hFlush stdout
---     input <- io getInput
---
---     case input of
---         ':':xs -> command xs
---         _ | last input == '.' -> do
---              case preprocess (init input) of
---                  ("", op) -> modify (`mappend` REPLST [] op)
---                  (s,  _)  -> do
---                      m <- parseS $ init s
---                      maybe (return ()) (\e -> modify (`mappend` REPLST [e] [])) m
---              roop
---           | otherwise -> do
---               case preprocess input of
---                   ("", _) -> return ()
---                   (s,  _) -> do
---                       m <- parseS $ init s
---                       REPLST es _ <- get
---                       maybe (return ()) (io . putStrLn . evalShow . Decl (fst prelude) . Decl es) m
---               roop
-
-
-    -- if head input == ':'
-    --     then command $ tail input
-    --     else do
-    --         case last input of
-    --             '.' -> declare $ init input
-    --             '?' -> bool $ init input
-    --             _   -> eval input
-
+evalF xs = case last xs of
+    '.' -> case preprocess (init xs) of
+        ("", op) -> modify (`mappend` REPLST [] op)
+        (s,  _)  -> do
+            m <- parseS $ init s
+            maybe (return ())
+                  (\e -> modify (`mappend` REPLST [e] [])) m
+    '?' -> case preprocess (init xs) of
+        ("", _) -> return ()
+        (s,  _) -> do
+            m <- parseS $ init s
+            REPLST es _ <- get
+            maybe (return ())
+                  (outputStrLn . reasonShow . Decl (fst prelude) . Decl es) m
+    _   -> case preprocess xs of
+        ("", _) -> return ()
+        (s,  _) -> do
+            m <- parseS $ init s
+            REPLST es _ <- get
+            maybe (return ())
+                  (outputStrLn . evalShow . Decl (fst prelude) . Decl es) m
 
 parseS :: String -> Shell REPLST (Maybe Expr)
 parseS s = do
@@ -160,61 +119,64 @@ prelude :: ([Expr], [ParseOption])
 prelude = let (s, ops) = preprocess code
           in (rights $ map (parse ops) $ lines s, ops)
     where
-        code =
-            "\n infixr 0 $ \
-            \\n infixr 2 or \
-            \\n infixr 3 and \
-            \\n infixf 4 == \
-            \\n infixf 4 /= \
-            \\n infixr 5 : \
-            \\n infixr 5 ++ \
-            \\n infixl 6 + \
-            \\n infixl 6 - \
-            \\n infixl 7 * \
-            \\n infixl 7 / \
-            \\n infixl 9 . \
+        code = unlines [
+            "infixr 0 $",
+            "infixr 2 or",
+            "infixr 3 and",
+            "infixf 4 ==",
+            "infixf 4 /=",
+            "infixr 5 :",
+            "infixr 5 ++",
+            "infixl 6 +",
+            "infixl 6 -",
+            "infixl 7 *",
+            "infixl 7 /",
+            "infixl 9 .",
 
-            \\n data / \
-            \\n data : \
-            \\n data [] \
-            \\n data Id \
+            "data /",
+            "data :",
+            "data []",
+            "data Id",
 
-            \\n (+) = #intplus \
-            \\n (-) = #intminus \
-            \\n (*) = #intmultiply \
+            -- "(+) = #intplus",
+            -- "(-) = #intminus",
+            -- "(*) = #intmultiply",
+            --
+            "true",
+            "~false",
+            -- "id x = x",
+            -- "const x _ = x",
+            -- "f $ x = f x",
+            --
+            -- "head (x:_) = x",
+            -- "tail (_:xs) = xs",
+            -- "last (x:[]) = x",
+            -- "last (_:xs) = last xs",
+            -- "init (x:_:[]) = [x]",
+            -- "init (x:xs)   = x : init xs",
+            -- "null [] = true",
+            -- "null xs = false",
+            -- "length []     = 0",
+            -- "length (_:xs) = length xs + 1",
+            -- "[]     ++ ys = ys",
+            -- "(x:xs) ++ ys = x:(xs ++ ys)",
+            -- "map _ []     = []",
+            -- "map f (x:xs) = f x : map f xs",
+            -- "foldl f a []     = a",
+            -- "foldl f a (x:xs) = foldl f (f a x) xs",
+            -- "foldr f z []     = z",
+            -- "foldr f z (x:xs) = f x (foldr f z xs)",
+            -- "concat = foldr (++) []",
+            -- "take _ []     = []",
+            -- "take 0 _      = []",
+            -- "take i (x:xs) = x : take (i - 1) xs",
+            -- "drop _ []     = []",
+            -- "drop 0 xs     = xs",
+            -- "drop i (_:xs) = drop (i - 1) xs",
 
-            \\n true \
-            \\n id x = x \
-            \\n const x _ = x \
-            \\n f $ x = f x \
+            ""
+            ]
 
-            \\n head (x:_) = x \
-            \\n tail (_:xs) = xs \
-            \\n last (x:[]) = x \
-            \\n last (_:xs) = last xs \
-            \\n init (x:_:[]) = [x] \
-            \\n init (x:xs)   = x : init xs \
-            \\n null [] = true \
-            \\n null xs = false \
-            \\n length []     = 0 \
-            \\n length (_:xs) = length xs + 1 \
-            \\n []     ++ ys = ys \
-            \\n (x:xs) ++ ys = x:(xs ++ ys) \
-            \\n map _ []     = [] \
-            \\n map f (x:xs) = f x : map f xs \
-            \\n foldl f a []     = a \
-            \\n foldl f a (x:xs) = foldl f (f a x) xs \
-            \\n foldr f z []     = z \
-            \\n foldr f z (x:xs) = f x (foldr f z xs) \
-            \\n concat = foldr (++) [] \
-            \\n take _ []     = [] \
-            \\n take 0 _      = [] \
-            \\n take i (x:xs) = x : take (i - 1) xs \
-            \\n drop _ []     = [] \
-            \\n drop 0 xs     = xs \
-            \\n drop i (_:xs) = drop (i - 1) xs \
-
-            \"
 
 --------------------------------------------------------------------------------
 

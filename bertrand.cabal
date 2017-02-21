@@ -28,6 +28,7 @@ library
                      , transformers
                      , extra
                      , monad-loops
+                     , free
                      , haskeline
   default-language:    Haskell2010
 

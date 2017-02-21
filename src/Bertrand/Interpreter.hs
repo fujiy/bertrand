@@ -1,16 +1,20 @@
--- {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TupleSections #-}
 -- {-# LANGUAGE LiberalTypeSynonyms #-}
 {-# LANGUAGE LambdaCase #-}
 
 module Bertrand.Interpreter
-    (evalShow
+    (evalShow,
+     reasonShow
     )where
 
+import Control.Applicative hiding (Const)
 import Control.Monad
 import Control.Monad.Extra
-import Control.Monad.Loops
+import Control.Monad.Free
+-- import Control.Monad.Loops
 -- import Control.Monad.Plus
-import qualified Control.Monad.State as ST
+import Control.Monad.Reader
+-- import Control.Monad.State
 import Data.Bool
 import Data.Either
 -- import Data.List
@@ -27,182 +31,129 @@ import Debug.Trace
 
 
 --------------------------------------------------------------------------------
-type Interpreter = ST.StateT [Envir] (Either IError)
+-- Data types --
+
+type Interpreter = Reader EnvirS
+
+type EnvirS = ([Envir], [String])
+
+sempty = ([], [])
+
+-- data IError = EmptyError
+--             | Paradox Expr Expr
+--     deriving (Eq, Show)
 
 type Evaluator a b = a -> Interpreter b
 
-data IError = IError
-    deriving (Eq, Show)
+type Lazy a = Free [] a
 
--- type Result = ([Expr], [Expr])
---
--- result :: [Expr] -> [Expr] -> Result
--- result ts ns = (ts, ns)
--- whnf :: Expr -> Result
--- whnf e = result [] [e]
--- thunks :: Result -> [Expr]
--- thunks = fst
--- whnfs :: Result -> [Expr]
--- whnfs = snd
--- rmap :: (Expr -> Expr) -> Result -> Result
--- rmap f (ts, ns) = (map f ts, map f ns)
+thunks :: [Lazy a] -> Lazy a
+thunks = Free
+
+
+type Reasoner a b = EnvirS -> a -> Lazy b
 
 --------------------------------------------------------------------------------
-data Thunk a = Thunk a
-             | WHNF a
+-- Interpreter --
 
-instance Functor Thunk where
-    f `fmap` Thunk a = Thunk $ f a
-    f `fmap` WHNF a  = WHNF  $ f a
-
---------------------------------------------------------------------------------
--- data Result a = Result [OR (Result a)]
---               | Pure a
---
--- instance Monoid (Result a) where
---     mempty = Result []
---     ra `mappend` rb = case (toList ra, toList rb) of
---         ([], _)  -> rb
---         (_, [])  -> ra
---         (as, bs) -> Result $ as ++ bs
---
--- instance Functor Result where
---     f `fmap` Pure a    = Pure (f a)
---     f `fmap` Result os = Result $ map (fmap (fmap f)) os
---
--- -- instance Applicative Result where
--- --     pure = Result . pure . pure
--- --     Result fs <*> Result os = Result $ map (<*>) fs <*> os
---
--- instance Show a => Show (Result a) where
---     show (Pure a)   = show a
---     -- show (Result []) = "⊥"
---     show (Result os) = intercalate "<<" (map show os)
---
--- -- pureR :: OR a -> Result a
--- -- pureR = Result . pure
---
--- toList :: Result a -> (Result a)]
--- toList = \case
---     Pure a    -> [pureOR a]
---     Result os -> os
---
--- lastR :: Result a -> OR a
--- lastR = \case
---     Pure a       -> pureO a
---     -- Result []    -> Nothing
---     Result (o:_) -> fmap lastR o
-
--- filterR :: (a -> Bool) -> Result a -> Result a
--- filterR f = \case
---     Pure a    -> if f a then Pure a else mzero
---     Result os ->
-
---------------------------------------------------------------------------------
-
--- type Lazy = ST.StateT ([Expr], [Expr]) Interpreter
--- type Lazy = ST.StateT [Expr] Interpreter
-
--- type Result = [Thunk Expr]
-
-evaluate :: Evaluator a b -> [Envir] -> a -> Either IError b
-evaluate f s a = ST.evalStateT (f a) s
+evaluate :: Evaluator a b -> a -> b
+evaluate f a = runReader (f a) sempty
                 --   in traceShow s' b
+evalWith :: EnvirS -> Evaluator a b -> a -> b
+evalWith envs f a = runReader (f a) envs
 
--- subState :: ST.State s a -> ST.State s a
--- subState f = ST.StateT $ \s -> let (_, a) = runState f s
---                            in  (s, a)
 subEnvir :: (Int, Envir) -> Interpreter a -> Interpreter a
-subEnvir (i, env) f = ST.StateT
-    (\s -> let (xs, ys) = splitAtEnd i s
-           in do
-               (a, ys') <- ST.runStateT f (env:ys)
-               return (a, xs ++ tail ys'))
+subEnvir (i, env) = local (\(es, ss) -> let (xs, ys) = splitAtEnd i es
+                                        in  (env:ys, ss))
+-- subEnvir (i, env) f = reader
+--     (\(es, ss) -> let (xs, ys) = splitAtEnd i es
+--            in runReader f (env:ys, ss))
+        --    in do
+        --        (a, (ys', _)) <- runStateT f (env:ys, ss)
+        --        return (a, (xs ++ tail ys', ss)))
+
+-- subScope :: String -> Interpreter a -> Interpreter a
+-- subScope s f = StateT
+--     (\(es, ss) -> do
+--                (a, (es', _)) <- runStateT f (es, s:ss)
+--                return (a, (es', ss)))
 
 envirs :: Interpreter [Envir]
-envirs = ST.get
+envirs = fst <$> ask
+
+-- varsInScope :: Interpreter [String]
+-- varsInScope = snd <$> get
+
+-- envirsWith :: (Expr -> Expr) -> Interpreter [Envir]
+-- envirsWith f = envirsOf $ f (Const "")
+--     where
+--         envirsOf :: Expr -> Interpreter [Envir]
+--         envirsOf = \case
+--             Env t e  -> subEnvir t (envirsOf e)
+--             Const "" -> envirs
 
 envirsNum :: Interpreter Int
-envirsNum = (\xs -> length xs - 1) <$> ST.get
+envirsNum = (\xs -> length xs - 1) <$> envirs
 
--- evalLazy :: Lazy a -> Expr -> Interpreter a
--- evalLazy f e = ST.evalStateT f ([e], [])
--- evalLazy f e = ST.evalStateT f [e]
-
--- evalCompleted :: Lazy Bool
--- evalCompleted = null <$> ST.get
-
--- partitionThunks :: [Thunk a] -> ([a], [a])
--- partitionThunks = foldr (\a (ts, ns) -> case a of
---                              Thunk a -> (a:ts, ns)
---                              WHNF a  -> (ts, a:ns) ) ([], [])
--- thunks :: [Thunk a] -> [a]
--- thunks = mapMaybe (\case Thunk a -> Just a
---                          WHNF _  -> Nothing)
-
-
--- modify :: (Envir -> Envir) -> Interpreter a ()
--- modify f _ = ST.modify (mapSnd f)
-
--- emapM :: Evaluator Expr Expr -> Evaluator Expr Expr
--- emapM f (Cons s as)= Cons s <$> mapM f as
--- emapM f (App a b) = do a' <- f a
---                        b' <- f b
---                        return $ App a' b'
--- emapM f (Lambda a b) = do a' <- f a
---                           b' <- f b
---                           return $ Lambda a' b'
--- emapM f (Bind s a)   = Bind s <$> f a
--- emapM f (Comma as)   = Comma <$> mapM f as
--- emapM f (Decl ds a)  = do ds' <- mapM f ds
---                           a' <- f a
---                           return $ Decl ds' a'
--- emapM f (Env r a)    = Env r <$> f a
--- emapM f a            = return a
+envir :: Expr -> Expr
+envir = fst . setVarScope 0 . declToEnvir 0
+    where
+        declToEnvir :: Int -> Expr -> Expr
+        declToEnvir i e = case e of
+            (Decl [] a)  -> declToEnvir i a
+            (Decl ds a)  -> Env (i, (Env (i + 1, eempty) . declToEnvir (i + 2)) `fmapE` toEnvir ds)
+                                (declToEnvir (i + 1) a)
+            -- (Decl ds a)  -> let (as, bs) = partitionBinds ds
+            --                 in Env (i, Envir (map (envir (i + 1)) as)
+            --                                  (binds $ map (envir (i + 1)) bs))
+            --                        (envir (i + 1) a)
+            (Lambda a b) -> Lambda (declToEnvir (i + 1) a) (declToEnvir (i + 1) b)
+            _            -> emap (declToEnvir i) e
 
 
--- new :: Interpreter Envir Ref
--- new env = do
---     m <- get
---     let (m', ref) = newMemory env m
---     put m'
---     return ref
---
--- read :: Interpreter Ref Envir
--- read ref = do
---     m <- get
---     return $ readMemory ref m
---
--- write :: (Envir -> Envir) -> Interpreter Ref ()
--- write f ref = do
---     m <- get
---     put $ writeMemory f ref m
+        -- setVar :: Expr -> Expr
+        -- setVar = \case
+        --     Env (j, env) e ->
+        --         Env (j, (setVar . setVarScope j) `fmapE` env) (setVar $ setVarScope j e)
+        --     e -> emap setVar e
 
---------------------------------------------------------------------------------
+        setVarScope :: Int -> Expr -> (Expr, [String])
+        setVarScope i = \case
+            Env (j, env) e
+                       -> let (e', ss) = setVarScope i e
+                              env' = fmapE (fst . setVarScope (j + 1) . setVar ss i) env
+                              ss' = concatMap (snd . setVarScope (j + 1)) (toList env)
+                          in (Env (j, env') e', ss')
+            Var 0 s    -> (Var i s, [s])
+            Data s es  -> let ts = map (setVarScope i) es
+                          in  (Data s (map fst ts), concatMap snd ts)
+            App a b    -> let (a', as) = setVarScope i a
+                              (b', bs) = setVarScope i b
+                          in  (App a' b', as ++ bs)
+            Lambda a b -> let (a', as) = setVarScope i a
+                              (b', bs) = setVarScope i b
+                          in  (Lambda a' b', as ++ bs)
+            Bind _ a   -> setVarScope i a
+            Comma es   -> let ts = map (setVarScope i) es
+                          in  (Comma (map fst ts), concatMap snd ts)
+            e          -> (e, [])
 
-evalShow :: Expr -> String
-evalShow e = traceShow e show $ evaluate evalAll [] (traceShowId $ envir 0 e)
--- evalShow :: Expr -> String
--- evalShow = let (m, ref) = singleton Root
---            in show . interpret (\e -> do
---                a <- envir ref e
---                traceShow (e, a) evalTo ref a) m
---             --    traceShow a return ()
---             --    as <- repeatM (evalStep ref) 5 a
---             --    return $ trace (unlines $ map show $ init as) last as) m
---
---            --
+        setVar :: [String] -> Int -> Expr -> Expr
+        setVar ss i = \case
+            Var 0 s | s `elem` ss
+                -> Var i s
+            e   -> emap (setVar ss i) e
 
-envir :: Int -> Expr -> Expr
-envir i e = case e of
-    (Decl [] a)  -> envir i a
-    (Decl ds a)  -> Env (i, envir (i + 1) `fmapE` toEnvir ds) (envir (i + 1) a)
-    -- (Decl ds a)  -> let (as, bs) = partitionBinds ds
-    --                 in Env (i, Envir (map (envir (i + 1)) as)
-    --                                  (binds $ map (envir (i + 1)) bs))
-    --                        (envir (i + 1) a)
-    (Lambda a b) -> Lambda (envir (i + 1) a) (envir (i + 1) b)
-    _            -> emap (envir i) e
+        -- getVars :: Expr -> [String]
+        -- getVars = \case
+        --     Var _ s    -> [s]
+        --     Data _ es  -> concatMap getVars es
+        --     App a b    -> getVars a ++ getVars b
+        --     Lambda a b -> getVars a ++ getVars b
+        --     Bind _ a   -> getVars a
+        --     Comma es   -> concatMap getVars es
+        --     Env _ a    -> getVars a
+        --     _          -> []
 
 toEnvir :: [Expr] -> Envir
 toEnvir es = let (as, bs) = partitionEithers $ map eitherBind es
@@ -216,12 +167,23 @@ toEnvir es = let (as, bs) = partitionEithers $ map eitherBind es
         binds :: [Expr] -> Binds
         binds = foldr (\(Bind s e) -> Map.insertWith (++) s [e]) mempty
 
-subEnv :: Functor f => Evaluator Expr (f Expr) -> Evaluator Expr (f Expr)
-subEnv f = \case
-    Env (i, _) (Env (j, env) a) | j <= i
-            -> subEnv f $ Env (j, env) a
-    Env t a -> fmap (Env t) <$> subEnvir t (f a)
-    a       -> f a
+detachEnv :: Expr -> (Expr -> Expr, Expr)
+detachEnv = \case
+    Env t a -> let (f, a') = detachEnv a
+               in  (Env t . f, a')
+    a       -> (id, a)
+
+-- modify :: (Envir -> Envir) -> Interpreter a ()
+-- modify f _ = ST.modify (mapSnd f)
+
+--------------------------------------------------------------------------------
+-- Show function --
+
+evalShow :: Expr -> String
+evalShow e = show $ evaluate evalAll (traceShowId $ envir e)
+
+reasonShow :: Expr -> String
+reasonShow e = traceShow e $ show $ evaluate boolean (traceShowId $ envir e)
 
 evalAll :: Evaluator Expr Expr
 evalAll e = do
@@ -230,9 +192,12 @@ evalAll e = do
     where
         evalF = \case
             Env t a -> Env t <$> subEnvir t (evalF a)
-            Const s es -> Const s <$> mapM evalAll es
+            Data s es -> Data s <$> mapM evalAll es
             Lambda a b -> Lambda  <$> evalAll a <*> evalAll b
             e          -> return e
+
+--------------------------------------------------------------------------------
+-- Evaluator --
 
 eval :: Evaluator Expr Expr
 eval e =
@@ -241,17 +206,17 @@ eval e =
    -- (\e' -> trace (show e ++ "\n  => " ++ show e') e') <$>
     case e of
     -- Env (i, _) (Env (j, env) a) | j <= i
-    --            -> eval $ Env (j, env) a
-    Env t a    -> Env t <$> subEnvir t (eval a)
-    Var s      -> bind s >>= maybe (return e) eval
-    Const s es -> bind s >>= maybe (evalSystemF e)
+    --           -> eval $ Env (j, env) a
+    Env t a   -> Env t <$> subEnvir t (eval a)
+    Const s   -> bind s >>= maybe (return e) eval
+    Var _ s   -> bind s >>= maybe (return e) eval
+    Data s es -> bind s >>= maybe (evalSystemF e)
                                    (\e' -> (\e'' -> foldl App e'' es) <$> eval e')
-
-    App a b -> do
+    App a b   -> do
         -- envs <- envirs
         -- traceShow ("App", envs, a, b) return ()
         as <- commaToList <$> eval a
-        cs <- mapM (evalSystemF . (`applyCons` b)) (filter isConst as)
+        cs <- mapM (evalSystemF . (`applyCons` b)) (filter isData as)
         fs <- lambdaTree $ filter isLambda as
         ls <- applyTree (fs, b)
         let es = cs ++ ls
@@ -271,11 +236,11 @@ eval e =
     _ -> return e
 
 applyCons :: Expr -> Expr -> Expr
-applyCons a b = let (f, Const s es) = detachEnv a
-                in  Const s $ map f es ++ [b]
+applyCons a b = let (f, Data s es) = detachEnv a
+                in  Data s $ map f es ++ [b]
 
 evalSystemF :: Evaluator Expr Expr
-evalSystemF e = let (f, Const s es) = detachEnv e
+evalSystemF e = let (f, Data s es) = detachEnv e
                 in case s of
                     '#':xs -> fromMaybe e <$>
                               Map.findWithDefault (const $ return Nothing) xs funcs es
@@ -283,9 +248,9 @@ evalSystemF e = let (f, Const s es) = detachEnv e
     where
         funcs :: Map.Map String (Evaluator [Expr] (Maybe Expr))
         funcs = Map.fromList
-            [("intplus",  func2 (\x y -> Just $ Const (show $ x + y) [])),
-             ("intminus", func2 (\x y -> Just $ Const (show $ x - y) [])),
-             ("intmultiply", func2 (\x y -> Just $ Const (show $ x * y) []))
+            [("intplus",  func2 (\x y -> Just $ Data (show $ x + y) [])),
+             ("intminus", func2 (\x y -> Just $ Data (show $ x - y) [])),
+             ("intmultiply", func2 (\x y -> Just $ Data (show $ x * y) []))
             ]
 
         func2 :: (Read a, Read b) => (a -> b -> Maybe Expr) -> Evaluator [Expr] (Maybe Expr)
@@ -294,7 +259,7 @@ evalSystemF e = let (f, Const s es) = detachEnv e
                 (_, a') <- detachEnv <$> eval a
                 (_, b') <- detachEnv <$> eval b
                 return $ case (a', b') of
-                    (Const as [], Const bs [])
+                    (Data as [], Data bs [])
                         -> case (readMaybe as, readMaybe bs) of
                                (Just x, Just y) -> f x y
                                _ -> Nothing
@@ -302,11 +267,9 @@ evalSystemF e = let (f, Const s es) = detachEnv e
             _ -> return Nothing
 
 lambdaTree :: Evaluator [Expr] (Forest Expr)
--- lambdaTree es = return $ map (`Node` []) es
 lambdaTree = foldM (curry addForest) []
 
 addForest :: Evaluator (Forest Expr, Expr) (Forest Expr)
--- addForest = undefined
 addForest (fe, e) = do
     (ls, rs)       <- partitionEithers <$> mapM
                       (\t@(Node a _) -> bool (Left t) (Right t) <$> imply (e, a)) fe
@@ -359,39 +322,6 @@ applyLambda (a, b) =
             envs <- reverse . dropEnd i . indexedR <$> envirs
             return $ foldr Env e envs
 
-match :: Evaluator (Expr, Expr) (Maybe [Expr])
-match (a, b) = do
-    (fa, ea) <- detachEnv <$> eval a
-    case ea of
-        Var "_" -> return $ Just []
-        Var s   -> do
-            i <- envirsNum
-            return $ if envirsNumOf i (fa ea) >= i
-                     then Just [Bind s b]
-                     else Just []
-        Const xs as -> do
-            (fb, eb) <- detachEnv <$> eval b
-            case eb of
-                Const ys bs | xs == ys && length as == length bs -> do
-                    ms <- mapM match $ zip (map fa as) (map fb bs)
-                    return $ if all isJust ms
-                             then Just $ concat $ catMaybes ms
-                             else Nothing
-                Comma bs -> undefined
-                _ -> return Nothing
-        Comma as -> do
-            ms <- mapM (\a' -> match (fa a', b)) as
-            return $ if any isJust ms
-                     then Just $ concat $ catMaybes ms
-                     else Nothing
-        App _ _ -> return Nothing
-        _       -> return Nothing
-    where
-        envirsNumOf :: Int -> Expr -> Int
-        envirsNumOf i = \case
-            Env (j, _) e -> envirsNumOf (min i j) e
-            _            -> i
-
 bind :: Evaluator String (Maybe Expr)
 bind s = do
     envs <- indexed . reverse <$> envirs
@@ -407,300 +337,327 @@ commaToList = \case
     Comma es -> concatMap commaToList es
     e        -> [e]
 
-detachEnv :: Expr -> (Expr -> Expr, Expr)
-detachEnv = \case
-    Env t a -> let (f, a') = detachEnv a
-               in  (Env t . f, a')
-    a       -> (id, a)
-
 isLambda :: Expr -> Bool
 isLambda e = case snd $ detachEnv e of
     Lambda _ _ -> True
     _          -> False
 
-isConst :: Expr -> Bool
-isConst e = case snd $ detachEnv e of
-    Const _ _ -> True
+isData :: Expr -> Bool
+isData e = case snd $ detachEnv e of
+    Data _ _ -> True
     _         -> False
 
---
--- evalStep :: Evaluator Expr Expr
--- -- eval r (Var s)
--- evalStep r e =
---     (\e' -> trace (show r ++ "<" ++ show e ++ " => " ++ show e' ++ ">") e') <$>
---     case e of
---     -- Var s     -> commaWith e . concatMap (Map.findWithDefault [] s . binds) <$> envirs r
---     Var s -> commaWith e . concatMap ((\(r, es) -> map (Env r) es) . lookupName s)
---              <$> envirs r
---
---     -- App (Env r' a') b -> evalStep r' (App a' b)
---     App a b -> do
---          as <- toList <$> evalTillLambda r a
---          let cs = map (`appCons` b) (filter isCons as)
---          fs <- lambdaTree r $ filter isLambda as
---          ls <- applyTree r (fs, b)
---         --  ls    <- mapM (\l -> apply r (l, b)) (filter isLambda as)
---          return $ Comma $ cs ++ ls
---         --  return $ Comma $ map (`appCons` b)   (filter isCons as)
---         --                ++ map (`appLambda` b) (filter isLambda as)
---     -- --              a' <- evalTillLambda r a
---     -- --              case a' of
---     -- --                  Lambda c d -> match
---
---     Env _ (Env ref a) -> evalStep r $ Env ref a
---
---     Env ref a | r == ref  -> evalStep ref a
---               | otherwise -> Env ref <$> evalStep ref a
---
---     Cons ('#':s) es -> systemF s <$> mapM (evalTo r) es
---     Cons s es -> Cons s <$> mapM (evalStep r) es
---
---     Comma [e] -> evalStep r e
---     Comma es  -> Comma <$> mapM (evalStep r) (nub es)
---
---     _ -> return e
---
---     where
---         commaWith :: Expr -> [Expr] -> Expr
---         commaWith e []  = e
---         commaWith _ [e] = e
---         commaWith _ es  = Comma es
---
---         lookupName :: String -> (Ref, Envir) -> (Ref, [Expr])
---         lookupName s = mapSnd $ concat . Map.lookup s . binds
---
---         toList :: Expr -> [Expr]
---         toList (Env r e)  = Env r `map` toList e
---         toList (Comma es) = es
---         toList e          = [e]
---
---         -- hideEnv :: Expr -> Expr
---         -- hideEnv (Env r a) = hideEnv $ emap (Env r) a
---         -- hideEnv a = a
---
---         isLambda :: Expr -> Bool
---         isLambda (Env _ a)    = isLambda a
---         isLambda (Lambda _ _ _) = True
---         isLambda _            = False
---
---         isCons :: Expr -> Bool
---         isCons (Env _ a)  = isCons a
---         isCons (Cons _ _) = True
---         isCons _          = False
---
---         appCons :: Expr -> Expr -> Expr
---         appCons a b = let (f, Cons s as) = detachEnv a
---                       in  Cons s $ map f as ++ [b]
---         -- appCons (Cons s es) e = Cons s $ es ++ [e]
---
---         lambdaTree :: Evaluator [Expr] (Forest Expr)
---         lambdaTree r =
---                         -- (\as -> trace ("t:" ++ drawForest (map (fmap show) as)) as) <$>
---                          foldM (curry $ addForest r) []
---             where
---                 addForest :: Evaluator (Forest Expr, Expr) (Forest Expr)
---                 -- f :: Forest Expr -> Expr -> State (Memory Envir) (Forest Expr)
---                 addForest r (ts, e) = let
---                     (re, e') = detachRef r e
---                     in case e' of
---                         Lambda _ a _ -> do
---                             -- a == b, a /= b, a => b, a <= b
---                             (xs, ys, zs, ws) <- foldM
---                                 (\(xs, ys, zs, ws) t@(Node x _) ->
---                                     let (rx, Lambda _ b _) = detachRef r x
---                                         a' = Env re a
---                                         b' = Env rx b
---                                     in do
---                                         aimpb <- isJust <$> imply r (a', b')
---                                         bimpa <- isJust <$> imply r (b', a')
---                                         return $ case (aimpb, bimpa) of
---                                             (True,  True)  -> (t:xs, ys, zs, ws)
---                                             (False, False) -> (xs, t:ys, zs, ws)
---                                             (True,  False) -> (xs, ys, t:zs, ws)
---                                             (False, True)  -> (xs, ys, zs, t:ws)
---                                 ) ([], [], [], []) ts
---                             if not $ null xs
---                             then let Node _ xs' = head xs
---                                  in return $ Node e xs' : ts
---                             else if not $ null zs
---                             then (++ ys) <$> mapM (\(Node z zs') -> Node z <$> addForest r (zs', e)) zs
---                             else return $ Node e ws : ys
---
---                         _ -> return ts
---
---         applyTree :: Evaluator (Forest Expr, Expr) [Expr]
---         applyTree r (xs, e) = concat <$> mapM
---             (\(Node a bs) -> apply r (a, e) >>=
---                 traceShow ('@', r, a, e)
---                              maybe (return [])
---                                    (\x -> defaultl x <$> applyTree r (bs, e))
---             ) xs
---
---         -- applyTree :: Forest Expr -> Expr
---         -- applyTree = Comma . concatMap
---         --             (\(Node a xs) -> maybe [] (defaultl a $ applyTree xs) apply  )
---             where
---                 defaultl :: a -> [a] -> [a]
---                 defaultl a [] = [a]
---                 defaultl _ as = as
---
---         apply :: Evaluator (Expr, Expr) (Maybe Expr)
---         apply r (a, b) = let (r', Lambda re c d) = detachRef r a
---                         --  in fmap (maybe (Env r' d) (`Env` d)) <$> match r' (re, c, Env r b)
---                          in fmap (bool (Env r' d) (Env re d)) <$> match r' (re, c, Env r b)
---         -- apply r (a, b) = case a of
---         --     Env r' a'  -> apply r' (a', Env r b)
---         --     -- Lambda c d -> return (Just d)
---         --     Lambda c d -> fmap (maybe d (`Env` d)) <$> match r (c, b)
---
---         match :: Evaluator (Ref, Expr, Expr) (Maybe Bool)
---         match r (re, a, b) = do
---             -- traceShow (a, b) return ()
---             m <- imply r (b, a)
---
---             maybe (return Nothing) (\es ->
---                 case es of
---                     [] -> return $ Just False
---                     _  -> do
---                         write (\(Envir ref _ xs) -> traceShow ("E", xs) Envir ref [] (toBinds es)) re
---                         -- r' <- new (Envir r [] $ toBinds es)
---                         -- return $ Just $ Just r'
---                         return $ Just True
---                   ) m
---
---         -- a => b, a ⊆ b
---         imply :: Evaluator (Expr, Expr) (Maybe [Expr])
---         imply r t = let
---             (a, b) = t
---             (fa, a') = detachEnv a
---             (fb, b') = detachEnv b
---             in case (a', b') of
---             (_, App _ _) -> do
---                 (fb', b'') <- detachEnv <$> evalTo r b
---                 case b'' of
---                     App _ _ -> return Nothing
---                     _        -> imply r (a, fb' b'')
---
---             (_, Cons xs bs) -> do
---                 (fa', a'') <- detachEnv <$> evalTillCons r a
---                 case a'' of
---                     Cons ys as | xs == ys && length as == length bs -> do
---                         ms <- mapM (imply r) $ zip (map fa' as) (map fb bs)
---                         if Nothing `elem` ms
---                         then return Nothing
---                         else return $ Just $ concat $ catMaybes ms
---                     Comma as -> do
---                         ms <- mapM (imply r . (, b) . fa') as
---                         if all isJust ms
---                         then return $ Just $ concat $ catMaybes ms
---                         else return Nothing
---                     _ -> return Nothing
---
---             (Bytes i, Bytes j) | i == j -> return $ Just []
---
---             (_, Comma bs) -> do
---                 ms <- mapM (imply r . (, a) . fb) bs
---                 if any isJust ms
---                 then return $ Just $ concat $ catMaybes ms
---                 else return Nothing
---
---             (_, Var "_") -> return $ Just []
---             (_, Var s) -> return $ Just [Bind s a]
---
---             (x, y) -> trace ("failed:" ++ show (x, y)) return Nothing
---
---         evalTillTerm :: Evaluator Expr Expr
---         evalTillTerm r a = evalStep r a >>=
---             (\a' -> if a == a'
---                     then return a
---                     else case snd $ detachRef r a' of
---                         App _ _ -> evalTillTerm r a'
---                         _       -> return a )
---
---         evalTillCons :: Evaluator Expr Expr
---         evalTillCons r a = evalStep r a >>=
---             (\a' -> let (r', a'') = detachRef r a' in case a'' of
---                 Cons s _ | head s /= '#' -> return a''
---                 Comma as -> do
---                     as' <- mapM (evalTillCons r') as
---                     return $ Env r' $ case as' of
---                         [x] -> x
---                         _   -> Comma as'
---                 _ | a == a' -> return a
---                 _           -> evalTillCons r a')
---
---
---         detachRef :: Ref -> Expr -> (Ref, Expr)
---         detachRef _ (Env r a) = case a of
---             Env _ _ -> detachRef r a
---             _       -> (r, a)
---         detachRef r a = (r, a)
---
---         detachEnv :: Expr -> (Expr -> Expr, Expr)
---         detachEnv (Env r a) = case a of
---             Env _ _ -> detachEnv a
---             _       -> (Env r, a)
---         detachEnv a = (id, a)
---
---         ref :: Ref -> Expr -> Ref
---         ref r e = fst $ detachRef r e
---
---
---         evalTillLambda :: Evaluator Expr Expr
---         evalTillLambda r a = let (r', b) = detachRef r a in case b of
---             Var _ -> do
---                 a' <- evalStep r a
---                 if a == a' then return a'
---                            else evalTillLambda r a'
---             -- Env _ _ -> evalStep r e >>= evalTillLambda r
---             App _ _  -> evalStep r a >>= evalTillLambda r
---             Comma as -> do
---                 as' <- mapM (evalTillLambda r') as
---                 return $ Env r' $ Comma as'
---             _ -> return a
---
---         exprs :: Expr -> [Expr]
---         exprs (Comma es) = es
---         exprs (Env r a)  = Env r <$> exprs a
---         exprs a          = [a]
---
---         systemF :: String -> [Expr] -> Expr
---         systemF s [a, b] | s `elem` ss =
---             case (snd $ detachEnv a, snd $ detachEnv b) of
---                 (Cons "_Int" [Bytes i], Cons "_Int" [Bytes j])
---                                -> Cons "_Int" [Bytes $ (fromJust $ lookup s fs) i j]
---                 (Comma as, b') -> Comma $ map (\a' -> systemF s [a', b']) as
---                 (a', Comma bs) -> Comma $ map (\b' -> systemF s [a', b']) bs
---                 _              -> Comma []
---             where
---                 ss = map fst fs
---                 fs = [("intplus", (+)), ("intminus", (-)), ("intmultiply", (*))]
---
---         systemF s es = Cons ('#':s) es
---
--- envirs :: Interpreter Ref [(Ref, Envir)]
--- envirs r = read r >>= \e -> case e of
---     Root            -> return [(r, Root)]
---     Envir ref es bs -> ((r, e):) <$> envirs ref
+--------------------------------------------------------------------------------
+-- Pattern matching --
+
+match :: Evaluator (Expr, Expr) (Maybe [Expr])
+match (a, b) = do
+    (fa, ea) <- detachEnv <$> eval a
+    case ea of
+        Const "_" -> return $ Just []
+        Const s   -> do
+            i <- envirsNum
+            return $ if envirsNumOf i (fa ea) >= i
+                     then Just [Bind s b]
+                     else Just []
+        Var _ s -> do
+            i <- envirsNum
+            return $ if envirsNumOf i (fa ea) >= i
+                     then Just [Bind s b]
+                     else Just []
+        Data xs as -> do
+            (fb, eb) <- detachEnv <$> eval b
+            case eb of
+                Data ys bs | xs == ys &&
+                              length as == length bs -> do
+                    ms <- mapM match $ zip (map fa as) (map fb bs)
+                    return $ if all isJust ms
+                             then Just $ concat $ catMaybes ms
+                             else Nothing
+                Comma bs -> undefined
+                _ -> return Nothing
+        Comma as -> do
+            ms <- mapM (\a' -> match (fa a', b)) as
+            return $ if any isJust ms
+                     then Just $ concat $ catMaybes ms
+                     else Nothing
+        App _ _ -> return Nothing
+        _       -> return Nothing
+
+        where
+            envirsNumOf :: Int -> Expr -> Int
+            envirsNumOf i = \case
+                Env (j, _) e -> envirsNumOf (min i j) e
+                _            -> i
+
+-- matchR :: Evaluator (Expr, Expr) Bool
+-- matchR (a, b) = do
+--     (fa, ea) <- detachEnv <$> eval a
+--     (fb, eb) <- detachEnv <$> eval b
+--     case (ea, eb) of
+--         (Const "_", _) -> return False
+--         (Const xs, Const ys) | xs == ys
+--             -> return True
+--         (Var xs, _)
+--             -> do
+--             es <- concatMap toExprs <$> envirs
+--             ds <- concatMapM (`search` fa ea) es
+--             and <$> mapM reason (ds <*> [fb eb])
+--         (Data xs as, Data ys bs) | xs == ys &&
+--                                    length as == length bs
+--             -> and <$> mapM matchR (zip (map fa as) (map fb bs))
+--         (App ax ay, App bx by)
+--             -> (&&) <$> matchR (fa ax, fb bx) <*> matchR (fa ay, fb by)
+--         _   -> return False
+
+-- step :: (a -> Lazy b) -> Lazy a -> Lazy b
+-- step f l = l >>= ()
 
 --------------------------------------------------------------------------------
+-- Reasoner --
+
+-- infer :: Evaluator Expr Bool
+-- infer a = reason' a >>= (\case
+--     Pure a -> return a
+--     Thunk ms -> foldReason ms )
+--     where
+--         foldReason :: [Interpreter (Lazy Bool)] -> Interpreter Bool
+--         foldReason [] = return False
+--         foldReason (m:ms) = m >>= (\case
+--             Pure True  -> return True
+--             Pure False -> foldReason ms
+--             Thunk [] -> trace "No" (foldReason ms)
+--             Thunk ms'  -> foldReason (ms ++ ms'))
+
+infer :: Evaluator Expr Bool
+infer e = do
+    envs <- ask
+    return $ case reason envs e of
+        Pure a -> a
+        Free s -> foldReason s
+    where
+        foldReason :: [Lazy Bool] -> Bool
+        foldReason [] = False
+        foldReason (l:ls) = case l of
+            Pure True  -> True
+            Pure False -> foldReason ls
+            Free ls'   -> foldReason (nub $ ls ++ ls')
+
+        -- foldReason :: [Lazy Bool] -> Bool
+        -- foldReason = foldl (\t -> \case
+        --     Pure t' -> t || t'
+        --     Free ls -> t || foldReason ls) False
+
+boolean :: Evaluator Expr Boolean
+boolean e = do
+    let (f, e') = detachEnv e
+    t <- infer e
+    if t then return T
+         else do
+            --  return U
+         f <- infer $ f (App (Const "~") e')
+         if f then return F
+              else return U
+
+reason :: Reasoner Expr Bool
+reason envs e = traceShow ('R', e, toExprs envs) $ case e of
+    Env t e -> reason (subEnvirR t envs) e
+    e       -> thunks $ map (\d -> matchR envs (d, e))
+                            (toExprs envs)
+
+matchR :: Reasoner (Expr, Expr) Bool
+matchR envs (a, b) = traceShow ('M', a, b) $ (\t -> traceShow (t, a, b) t) <$> let
+    (fa, ea) = detachEnv $ evalWith envs eval a
+    (fb, eb) = detachEnv $ evalWith envs eval b
+    in case (ea, eb) of
+        (Const "_", _)
+            -> pure True
+        (Const xs, Const ys) | xs == ys
+            -> pure True
+        (Var _ xs, Var _ ys) | xs == ys &&
+                           xs `elem` varsInScope envs
+            -> pure True
+        (Var i xs, _) ->
+        -- ????
+            -- traceShow ('V', a, b, toExprs $ envirsWith fa envs, takeE i $ envirsWith fa envs) $
+            thunks $ map (\d -> ($ fb eb) <$>
+                                search (subScopeR xs envs) (d, fa ea)
+                                >>= reason envs)
+                         (takeE i $ envirsWith fa envs)
+        (App ax ay, App bx by) -> do
+            ta <- matchR envs (fa ax, fb bx)
+            if ta then matchR envs (fa ay, fb by)
+                  else pure False
+            -- (&&) <$> matchR envs (fa ax, fb bx)
+            --      <*> matchR envs (fa ay, fb by)
+        _ -> pure False
+
+search :: Reasoner (Expr, Expr) (Expr -> Expr)
+search envs (d, a) =
+    -- traceShow ('s', a, d) $
+    -- fmap (\f -> traceShow ('S', a, d, f (Const "@")) f) $
+    matchR envs (d, a)
+    >>= \t -> if t
+        then return id
+        else let (fd, d') = detachEnv d
+             in case d' of
+                --  Env t d'  ->
+                --     (Env t .) <$> search (subEnvirR t envs) (d', a)
+                 App dx dy ->
+                    -- ((\f g e -> App (f e) (g e)) <$>
+                    -- search envs (fd dx, a) <*> search envs (fd dy, a))
+                    -- <|>
+                        ((\f e -> fd $ App (f e) dy) <$> search envs (fd dx, a))
+                    <|> ((\g e -> fd $ App dx (g e)) <$> search envs (fd dy, a))
+                 _ -> empty
+
+-- search' :: Reasoner (Expr, Expr) (Expr -> Expr)
+-- search' (d, a) = fmap (traceShow ('T', d, a)) <$> do
+--     lt <- matchR' (d, a)
+--     traceShow ('S', d, a) <$> return $ do
+--         t <- lt
+--         if t then return id
+--              else case a of
+--                  Env t a' ->
+--                      (Env t .) <$>
+--                      thunk (subEnvir t $ search' (d, a'))
+--                  App xa ya ->
+--                      thunk (search' (d, xa)) <|>
+--                      thunk (search' (d, ya))
+--                  _ -> empty
+
+-- matchR' :: Reasoner (Expr, Expr) Bool
+-- matchR' (a, b) =
+--     fmap (\t -> traceShow ('M', a, b, t) t) <$>
+--         do
+--     (fa, ea) <- detachEnv <$> eval a
+--     (fb, eb) <- detachEnv <$> eval b
+--     envs <- envirs
+--     traceShow ('m', a, b, envs) $ case (ea, eb) of
+--         (Const "_", _) -> return $ Pure True
+--         (Const xs, Const ys) | xs == ys
+--             -> return $ traceShow ('C', xs) Pure True
+--         (Var xs, _) -> do
+--             -- ss <- varsInScope
+--             -- if (\t -> traceShow (ss, ea, eb, t) t) $ ea == eb && xs `elem` ss
+--             -- then return $ traceShow ('v', xs) Pure True
+--             -- else do
+--                 es <- concatMap toExprs <$> envirsWith fa
+--                 es' <- concatMap toExprs <$> envirs
+--                 traceShow ('V', fa ea, fb eb, es, es') return $ msum $ Pure False : map (\d ->
+--                     thunk $ (>>= thunk . reason') . fmap ($ fb eb)
+--                     <$> search' (d, fa ea)
+--                     ) es
+--                 -- ls <- mapM (\d -> fmap ($ fb eb) <$>
+--                 --                   search' (d, fa ea)) es
+--                 -- traceShow ('V', es) return $ Thunk $ map (return . (>>= thunk . reason')) ls
+--         --     -- and <$> mapM reason (ds <*> [fb eb])
+--         -- (Data xs as, Data ys bs) | xs == ys &&
+--         --                            length as == length bs
+--         --     -> bool [] [Pure ()] . all notNull
+--         --        <$> mapM matchR' (zip (map fa as) (map fb bs))
+--         (App ax ay, App bx by) -> traceShow ('P', a, b) $ do
+--             -- t <- fmap traceShowId <$> matchR' (fa ax, fb bx)
+--             u <- fmap traceShowId <$> matchR' (fa ay, fb by)
+--             return $ u >>= (\x -> traceShow ('t', x) $ return x)
+--             -- return $ (\x y -> traceShow ('T', x, y) x) <$> t <*> (Pure False)
+--             -- return $ (\x y -> traceShow ('A', a, b, x, y) (x && y)) <$> t <*> u
+--         --     -> undefined ((&&)
+--         --         <$> matchR' (fa ax, fb bx)
+--         --         <*> matchR' (fa ay, fb by))
+--         _   -> return $ traceShow ("false", a, b) Pure False
+
+
+subEnvirR :: (Int, Envir) -> EnvirS -> EnvirS
+subEnvirR (i, env) (es, ss) = (env : takeEnd i es, ss)
+
+subScopeR :: String -> EnvirS -> EnvirS
+subScopeR s = mapSnd (s:)
+
+envirsWith :: (Expr -> Expr) -> EnvirS -> EnvirS
+envirsWith f envs = envirsOf envs $ f (Const "")
+    where
+        envirsOf :: EnvirS -> Expr -> EnvirS
+        envirsOf envs = \case
+            Env t e  -> envirsOf (subEnvirR t envs) e
+            Const "" -> envs
+
+toExprs :: EnvirS -> [Expr]
+toExprs = concatMap (\(Envir xs _) -> xs) . fst
+
+takeE :: Int -> EnvirS -> [Expr]
+takeE i (envs, _) = concatMap (\(Envir xs _) -> xs) $ dropEnd i envs
+
+varsInScope :: EnvirS -> [String]
+varsInScope = snd
+
+-- reason' :: Reasoner Expr Bool
+-- reason' = \case
+--     Env t e -> subEnvir t $ reason' e
+--     e -> fmap (\t -> traceShow ('R', e, t) t) <$> do
+--         es <- concatMap toExprs <$> envirs
+--         return (fmap (\t -> traceShow ('E', e, es, t) t) <$> Thunk $ return (Pure False) : map (\a -> matchR' (a, e)) es)
+
+-- search :: Expr -> Evaluator Expr [Expr -> Expr]
+-- search d a = traceShow ("T", d, a) $ do
+--     t <- matchR (a, d)
+--     if t then return [id]
+--          else case a of
+--          Env t a'  -> fmap (Env t .)  <$> subEnvir t (search d a')
+--          Data s as -> do
+--              xs <- mapM (search d) as
+--              if all null xs
+--              then return []
+--              else let fss = zipWith (\a fs -> if null fs then [const a]
+--                                                          else fs) as xs
+--                   in return $ map (\fs e -> Data s (fs <*> [e])) $ sequence fss
+--          App a b -> do
+--              fs <- search d a
+--              gs <- search d b
+--              return $ case (fs, gs) of
+--                  ([], []) -> []
+--                  (_,  []) -> map (\f e -> App (f e) b) fs
+--                  ([], _ ) -> map (\g e -> App a (g e)) gs
+--                  _        -> [\e -> App (f e) (g e) | f <- fs, g <- gs]
+--          _ -> return []
+
+
+-- reason :: Evaluator Expr Bool
+-- reason = \case
+--     -- Env (i, _) (Env (j, env) e) | j <= i
+--     --         -> reason $ Env (j, env) e
+--     Env t e -> subEnvir t (reason e)
+--     e -> traceShow ("A", e) $ do
+--         -- es' <- map toExprs <$> envirs
+--         es <- concatMap toExprs <$> envirs
+--         traceShow es orM $ map (\a -> matchR (a, e)) es
+
+
+-- reasonOn :: Expr -> Evaluator Expr Bool
+-- reasonOn (Env (i, _) d) = reasonOn' i d
+--     where
+--         reasonOn' :: Int -> Expr -> Evaluator Expr Bool
+--         reasonOn' i d a = matchR (d, a)
+
+--------------------------------------------------------------------------------
+-- Utility functions --
 
 mapSnd :: (b -> c) -> (a, b) -> (a, c)
 mapSnd f (a, b) = (a, f b)
 
-tmap :: (a -> b) -> (a, a) -> (b, b)
-tmap f (a, b) = (f a, f b)
+-- tmap :: (a -> b) -> (a, a) -> (b, b)
+-- tmap f (a, b) = (f a, f b)
 
-may :: Maybe a -> b -> (a -> b) -> b
-may m b f = maybe b f m
+-- may :: Maybe a -> b -> (a -> b) -> b
+-- may m b f = maybe b f m
 
-repeatM :: Monad m => (a -> m a) -> Int -> a -> m [a]
-repeatM f i a
-    | i <= 0 = return []
-    | otherwise = do
-        a' <- f a
-        as <- repeatM f (i - 1) a'
-        return $ a' : as
+-- repeatM :: Monad m => (a -> m a) -> Int -> a -> m [a]
+-- repeatM f i a
+--     | i <= 0 = return []
+--     | otherwise = do
+--         a' <- f a
+--         as <- repeatM f (i - 1) a'
+--         return $ a' : as
 
 indexed :: [a] -> [(Int, a)]
 indexed = zip [0..]
@@ -710,3 +667,10 @@ indexedR xs = zip (iterate (\i -> i - 1) (length xs - 1)) xs
 
 readMaybe :: Read a => String -> Maybe a
 readMaybe = fmap fst . listToMaybe . reads
+
+maybeToEither :: a -> Maybe b -> Either a b
+maybeToEither a (Just b) = Right b
+maybeToEither a Nothing = Left a
+
+notNull :: [a] -> Bool
+notNull = not . null
