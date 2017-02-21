@@ -7,7 +7,7 @@ module Bertrand.Interpreter
      reasonShow
     )where
 
-import Control.Applicative hiding (Const)
+import Control.Applicative
 import Control.Monad
 import Control.Monad.Extra
 import Control.Monad.Free
@@ -85,18 +85,18 @@ envirs = fst <$> ask
 -- varsInScope = snd <$> get
 
 -- envirsWith :: (Expr -> Expr) -> Interpreter [Envir]
--- envirsWith f = envirsOf $ f (Const "")
+-- envirsWith f = envirsOf $ f (Var "")
 --     where
 --         envirsOf :: Expr -> Interpreter [Envir]
 --         envirsOf = \case
 --             Env t e  -> subEnvir t (envirsOf e)
---             Const "" -> envirs
+--             Var "" -> envirs
 
 envirsNum :: Interpreter Int
 envirsNum = (\xs -> length xs - 1) <$> envirs
 
 envir :: Expr -> Expr
-envir = fst . setVarScope 0 . declToEnvir 0
+envir = fst . setParamScope 0 . declToEnvir 0
     where
         declToEnvir :: Int -> Expr -> Expr
         declToEnvir i e = case e of
@@ -111,48 +111,48 @@ envir = fst . setVarScope 0 . declToEnvir 0
             _            -> emap (declToEnvir i) e
 
 
-        -- setVar :: Expr -> Expr
-        -- setVar = \case
+        -- setParam :: Expr -> Expr
+        -- setParam = \case
         --     Env (j, env) e ->
-        --         Env (j, (setVar . setVarScope j) `fmapE` env) (setVar $ setVarScope j e)
-        --     e -> emap setVar e
+        --         Env (j, (setParam . setParamScope j) `fmapE` env) (setParam $ setParamScope j e)
+        --     e -> emap setParam e
 
-        setVarScope :: Int -> Expr -> (Expr, [String])
-        setVarScope i = \case
+        setParamScope :: Int -> Expr -> (Expr, [String])
+        setParamScope i = \case
             Env (j, env) e
-                       -> let (e', ss) = setVarScope i e
-                              env' = fmapE (fst . setVarScope (j + 1) . setVar ss i) env
-                              ss' = concatMap (snd . setVarScope (j + 1)) (toList env)
+                       -> let (e', ss) = setParamScope i e
+                              env' = fmapE (fst . setParamScope (j + 1) . setParam ss i) env
+                              ss' = concatMap (snd . setParamScope (j + 1)) (toList env)
                           in (Env (j, env') e', ss')
-            Var 0 s    -> (Var i s, [s])
-            Data s es  -> let ts = map (setVarScope i) es
-                          in  (Data s (map fst ts), concatMap snd ts)
-            App a b    -> let (a', as) = setVarScope i a
-                              (b', bs) = setVarScope i b
+            Param 0 s  -> (Param i s, [s])
+            Cons s es  -> let ts = map (setParamScope i) es
+                          in  (Cons s (map fst ts), concatMap snd ts)
+            App a b    -> let (a', as) = setParamScope i a
+                              (b', bs) = setParamScope i b
                           in  (App a' b', as ++ bs)
-            Lambda a b -> let (a', as) = setVarScope i a
-                              (b', bs) = setVarScope i b
+            Lambda a b -> let (a', as) = setParamScope i a
+                              (b', bs) = setParamScope i b
                           in  (Lambda a' b', as ++ bs)
-            Bind _ a   -> setVarScope i a
-            Comma es   -> let ts = map (setVarScope i) es
+            Bind _ a   -> setParamScope i a
+            Comma es   -> let ts = map (setParamScope i) es
                           in  (Comma (map fst ts), concatMap snd ts)
             e          -> (e, [])
 
-        setVar :: [String] -> Int -> Expr -> Expr
-        setVar ss i = \case
-            Var 0 s | s `elem` ss
-                -> Var i s
-            e   -> emap (setVar ss i) e
+        setParam :: [String] -> Int -> Expr -> Expr
+        setParam ss i = \case
+            Param 0 s | s `elem` ss
+                -> Param i s
+            e   -> emap (setParam ss i) e
 
-        -- getVars :: Expr -> [String]
-        -- getVars = \case
-        --     Var _ s    -> [s]
-        --     Data _ es  -> concatMap getVars es
-        --     App a b    -> getVars a ++ getVars b
-        --     Lambda a b -> getVars a ++ getVars b
-        --     Bind _ a   -> getVars a
-        --     Comma es   -> concatMap getVars es
-        --     Env _ a    -> getVars a
+        -- getParams :: Expr -> [String]
+        -- getParams = \case
+        --     Param _ s    -> [s]
+        --     Cons _ es  -> concatMap getParams es
+        --     App a b    -> getParams a ++ getParams b
+        --     Lambda a b -> getParams a ++ getParams b
+        --     Bind _ a   -> getParams a
+        --     Comma es   -> concatMap getParams es
+        --     Env _ a    -> getParams a
         --     _          -> []
 
 toEnvir :: [Expr] -> Envir
@@ -192,7 +192,7 @@ evalAll e = do
     where
         evalF = \case
             Env t a -> Env t <$> subEnvir t (evalF a)
-            Data s es -> Data s <$> mapM evalAll es
+            Cons s es -> Cons s <$> mapM evalAll es
             Lambda a b -> Lambda  <$> evalAll a <*> evalAll b
             e          -> return e
 
@@ -208,15 +208,15 @@ eval e =
     -- Env (i, _) (Env (j, env) a) | j <= i
     --           -> eval $ Env (j, env) a
     Env t a   -> Env t <$> subEnvir t (eval a)
-    Const s   -> bind s >>= maybe (return e) eval
-    Var _ s   -> bind s >>= maybe (return e) eval
-    Data s es -> bind s >>= maybe (evalSystemF e)
+    Var s     -> bind s >>= maybe (return e) eval
+    Param _ s -> bind s >>= maybe (return e) eval
+    Cons s es -> bind s >>= maybe (evalSystemF e)
                                    (\e' -> (\e'' -> foldl App e'' es) <$> eval e')
     App a b   -> do
         -- envs <- envirs
         -- traceShow ("App", envs, a, b) return ()
         as <- commaToList <$> eval a
-        cs <- mapM (evalSystemF . (`applyCons` b)) (filter isData as)
+        cs <- mapM (evalSystemF . (`applyCons` b)) (filter isCons as)
         fs <- lambdaTree $ filter isLambda as
         ls <- applyTree (fs, b)
         let es = cs ++ ls
@@ -236,11 +236,11 @@ eval e =
     _ -> return e
 
 applyCons :: Expr -> Expr -> Expr
-applyCons a b = let (f, Data s es) = detachEnv a
-                in  Data s $ map f es ++ [b]
+applyCons a b = let (f, Cons s es) = detachEnv a
+                in  Cons s $ map f es ++ [b]
 
 evalSystemF :: Evaluator Expr Expr
-evalSystemF e = let (f, Data s es) = detachEnv e
+evalSystemF e = let (f, Cons s es) = detachEnv e
                 in case s of
                     '#':xs -> fromMaybe e <$>
                               Map.findWithDefault (const $ return Nothing) xs funcs es
@@ -248,9 +248,9 @@ evalSystemF e = let (f, Data s es) = detachEnv e
     where
         funcs :: Map.Map String (Evaluator [Expr] (Maybe Expr))
         funcs = Map.fromList
-            [("intplus",  func2 (\x y -> Just $ Data (show $ x + y) [])),
-             ("intminus", func2 (\x y -> Just $ Data (show $ x - y) [])),
-             ("intmultiply", func2 (\x y -> Just $ Data (show $ x * y) []))
+            [("intplus",  func2 (\x y -> Just $ Cons (show $ x + y) [])),
+             ("intminus", func2 (\x y -> Just $ Cons (show $ x - y) [])),
+             ("intmultiply", func2 (\x y -> Just $ Cons (show $ x * y) []))
             ]
 
         func2 :: (Read a, Read b) => (a -> b -> Maybe Expr) -> Evaluator [Expr] (Maybe Expr)
@@ -259,7 +259,7 @@ evalSystemF e = let (f, Data s es) = detachEnv e
                 (_, a') <- detachEnv <$> eval a
                 (_, b') <- detachEnv <$> eval b
                 return $ case (a', b') of
-                    (Data as [], Data bs [])
+                    (Cons as [], Cons bs [])
                         -> case (readMaybe as, readMaybe bs) of
                                (Just x, Just y) -> f x y
                                _ -> Nothing
@@ -342,9 +342,9 @@ isLambda e = case snd $ detachEnv e of
     Lambda _ _ -> True
     _          -> False
 
-isData :: Expr -> Bool
-isData e = case snd $ detachEnv e of
-    Data _ _ -> True
+isCons :: Expr -> Bool
+isCons e = case snd $ detachEnv e of
+    Cons _ _ -> True
     _         -> False
 
 --------------------------------------------------------------------------------
@@ -354,21 +354,21 @@ match :: Evaluator (Expr, Expr) (Maybe [Expr])
 match (a, b) = do
     (fa, ea) <- detachEnv <$> eval a
     case ea of
-        Const "_" -> return $ Just []
-        Const s   -> do
+        Var "_" -> return $ Just []
+        Var s -> do
             i <- envirsNum
             return $ if envirsNumOf i (fa ea) >= i
                      then Just [Bind s b]
                      else Just []
-        Var _ s -> do
+        Param _ s -> do
             i <- envirsNum
             return $ if envirsNumOf i (fa ea) >= i
                      then Just [Bind s b]
                      else Just []
-        Data xs as -> do
+        Cons xs as -> do
             (fb, eb) <- detachEnv <$> eval b
             case eb of
-                Data ys bs | xs == ys &&
+                Cons ys bs | xs == ys &&
                               length as == length bs -> do
                     ms <- mapM match $ zip (map fa as) (map fb bs)
                     return $ if all isJust ms
@@ -395,15 +395,15 @@ match (a, b) = do
 --     (fa, ea) <- detachEnv <$> eval a
 --     (fb, eb) <- detachEnv <$> eval b
 --     case (ea, eb) of
---         (Const "_", _) -> return False
---         (Const xs, Const ys) | xs == ys
+--         (Var "_", _) -> return False
+--         (Var xs, Var ys) | xs == ys
 --             -> return True
---         (Var xs, _)
+--         (Param xs, _)
 --             -> do
 --             es <- concatMap toExprs <$> envirs
 --             ds <- concatMapM (`search` fa ea) es
 --             and <$> mapM reason (ds <*> [fb eb])
---         (Data xs as, Data ys bs) | xs == ys &&
+--         (Cons xs as, Cons ys bs) | xs == ys &&
 --                                    length as == length bs
 --             -> and <$> mapM matchR (zip (map fa as) (map fb bs))
 --         (App ax ay, App bx by)
@@ -455,7 +455,7 @@ boolean e = do
     if t then return T
          else do
             --  return U
-         f <- infer $ f (App (Const "~") e')
+         f <- infer $ f (App (Var "~") e')
          if f then return F
               else return U
 
@@ -470,14 +470,14 @@ matchR envs (a, b) = traceShow ('M', a, b) $ (\t -> traceShow (t, a, b) t) <$> l
     (fa, ea) = detachEnv $ evalWith envs eval a
     (fb, eb) = detachEnv $ evalWith envs eval b
     in case (ea, eb) of
-        (Const "_", _)
+        (Var "_", _)
             -> pure True
-        (Const xs, Const ys) | xs == ys
+        (Var xs, Var ys) | xs == ys
             -> pure True
-        (Var _ xs, Var _ ys) | xs == ys &&
+        (Param _ xs, Param _ ys) | xs == ys &&
                            xs `elem` varsInScope envs
             -> pure True
-        (Var i xs, _) ->
+        (Param i xs, _) ->
         -- ????
             -- traceShow ('V', a, b, toExprs $ envirsWith fa envs, takeE i $ envirsWith fa envs) $
             thunks $ map (\d -> ($ fb eb) <$>
@@ -495,7 +495,7 @@ matchR envs (a, b) = traceShow ('M', a, b) $ (\t -> traceShow (t, a, b) t) <$> l
 search :: Reasoner (Expr, Expr) (Expr -> Expr)
 search envs (d, a) =
     -- traceShow ('s', a, d) $
-    -- fmap (\f -> traceShow ('S', a, d, f (Const "@")) f) $
+    -- fmap (\f -> traceShow ('S', a, d, f (Var "@")) f) $
     matchR envs (d, a)
     >>= \t -> if t
         then return id
@@ -534,10 +534,10 @@ search envs (d, a) =
 --     (fb, eb) <- detachEnv <$> eval b
 --     envs <- envirs
 --     traceShow ('m', a, b, envs) $ case (ea, eb) of
---         (Const "_", _) -> return $ Pure True
---         (Const xs, Const ys) | xs == ys
+--         (Var "_", _) -> return $ Pure True
+--         (Var xs, Var ys) | xs == ys
 --             -> return $ traceShow ('C', xs) Pure True
---         (Var xs, _) -> do
+--         (Param xs, _) -> do
 --             -- ss <- varsInScope
 --             -- if (\t -> traceShow (ss, ea, eb, t) t) $ ea == eb && xs `elem` ss
 --             -- then return $ traceShow ('v', xs) Pure True
@@ -552,7 +552,7 @@ search envs (d, a) =
 --                 --                   search' (d, fa ea)) es
 --                 -- traceShow ('V', es) return $ Thunk $ map (return . (>>= thunk . reason')) ls
 --         --     -- and <$> mapM reason (ds <*> [fb eb])
---         -- (Data xs as, Data ys bs) | xs == ys &&
+--         -- (Cons xs as, Cons ys bs) | xs == ys &&
 --         --                            length as == length bs
 --         --     -> bool [] [Pure ()] . all notNull
 --         --        <$> mapM matchR' (zip (map fa as) (map fb bs))
@@ -575,12 +575,12 @@ subScopeR :: String -> EnvirS -> EnvirS
 subScopeR s = mapSnd (s:)
 
 envirsWith :: (Expr -> Expr) -> EnvirS -> EnvirS
-envirsWith f envs = envirsOf envs $ f (Const "")
+envirsWith f envs = envirsOf envs $ f (Var "")
     where
         envirsOf :: EnvirS -> Expr -> EnvirS
         envirsOf envs = \case
             Env t e  -> envirsOf (subEnvirR t envs) e
-            Const "" -> envs
+            Var "" -> envs
 
 toExprs :: EnvirS -> [Expr]
 toExprs = concatMap (\(Envir xs _) -> xs) . fst
@@ -604,13 +604,13 @@ varsInScope = snd
 --     if t then return [id]
 --          else case a of
 --          Env t a'  -> fmap (Env t .)  <$> subEnvir t (search d a')
---          Data s as -> do
+--          Cons s as -> do
 --              xs <- mapM (search d) as
 --              if all null xs
 --              then return []
 --              else let fss = zipWith (\a fs -> if null fs then [const a]
 --                                                          else fs) as xs
---                   in return $ map (\fs e -> Data s (fs <*> [e])) $ sequence fss
+--                   in return $ map (\fs e -> Cons s (fs <*> [e])) $ sequence fss
 --          App a b -> do
 --              fs <- search d a
 --              gs <- search d b

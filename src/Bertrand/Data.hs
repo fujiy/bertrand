@@ -12,7 +12,7 @@ module Bertrand.Data
     ) where
 
 
-import Control.Applicative hiding (Const)
+import Control.Applicative
 import Control.Monad
 -- import Data.Bits
 import Data.List
@@ -35,9 +35,9 @@ instance Show ParseOption where
     show (DataCons s) = "data " ++ s
 
 --------------------------------------------------------------------------------
-data Expr = Const String
-          | Var Int String
-          | Data String [Expr]
+data Expr = Var String
+          | Param Int String
+          | Cons String [Expr]
           | App Expr Expr
           | Lambda Expr Expr
           | Bind String Expr
@@ -47,10 +47,10 @@ data Expr = Const String
     deriving Eq
 
 instance Show Expr where
-    show (Const s)      = s
-    show (Var i s)      = show i ++ s
-    show (Data s [])    = '\'' : s
-    show (Data s es)    = "('" ++ s ++ " " ++ unwords (map show es) ++ ")"
+    show (Var s)        = s
+    show (Param i s)    = show i ++ s
+    show (Cons s [])    = '\'' : s
+    show (Cons s es)    = "('" ++ s ++ " " ++ unwords (map show es) ++ ")"
     show (App a b)      = "(" ++ show a ++ " " ++ show b ++ ")"
     show (Lambda a b)   = "(\\" ++ show a ++ " -> " ++ show b ++ ")"
     show (Bind a b)     = a ++ " = " ++ show b
@@ -60,7 +60,7 @@ instance Show Expr where
     -- show (Env (i, e) a) = show a
 
 emap :: (Expr -> Expr) -> Expr -> Expr
-emap f (Data s es)  = Data s (map f es)
+emap f (Cons s es)  = Cons s (map f es)
 emap f (App a b)    = App (f a) (f b)
 emap f (Lambda a b) = Lambda (f a) (f b)
 emap f (Bind s a)   = Bind s (f a)

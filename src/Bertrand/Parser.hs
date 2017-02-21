@@ -5,7 +5,7 @@ module Bertrand.Parser
     )where
 
 import Prelude hiding (null)
-import Control.Applicative hiding (Const)
+import Control.Applicative
 import Control.Monad
 -- import Control.Monad.Trans.Maybe
 -- import Control.Monad.State
@@ -117,7 +117,7 @@ parse os cs = let (m, ParserState p _) = runParser (parser os) (purePS cs)
 type OpeParser = Parser Expr -> Parser Expr
 
 parser :: [ParseOption] -> Parser Expr
-parser ops = toData ops <$> expr <* eof
+parser ops = toCons ops <$> expr <* eof
     where
         expr :: Parser Expr
         expr = foldr id (apply signs expr) opeparsers
@@ -132,10 +132,10 @@ parser ops = toData ops <$> expr <* eof
         signs :: [String]
         signs = "!":"=":";":"\\":"->":",": foldr (\(is, ils, irs, ifs) s -> is ++ ils ++ irs ++ ifs ++ s) [] opers
 
-toData :: [ParseOption] -> Expr -> Expr
-toData ops = \case
-    Const s -> if s `elem` consts then Data s [] else Const s
-    a       -> emap (toData ops) a
+toCons :: [ParseOption] -> Expr -> Expr
+toCons ops = \case
+    Var s -> if s `elem` consts then Cons s [] else Var s
+    a       -> emap (toCons ops) a
     where
         consts :: [String]
         consts = mapMaybe (\case
@@ -144,7 +144,7 @@ toData ops = \case
 
         -- replaceCons :: Expr -> Expr
         -- replaceCons a = case appToList a of
-        --     Const s : es | s `elem` dataconses
+        --     Var s : es | s `elem` dataconses
         --         -> Cons s (map replaceCons es)
         --     _   -> emap replaceCons a
 
@@ -209,15 +209,15 @@ opeparser (is, ils, irs, ifs) p = infixp $ infixlp $ infixrp $ infixfp p
                 f [a]       = a
                 f [a, o]    = App o a
                 f [a, o, b] = App (App o a) b
-                f (a:o:b:x) = App (App (Const "and") $ f [a, o, b]) $ f (b:x)
+                f (a:o:b:x) = App (App (Var "and") $ f [a, o, b]) $ f (b:x)
                 g :: Parser [Expr]
                 g = (:) <$> p <*> (concat <$> optionL ((:) <$> oper ifs <*> g))
 
-        oper s = Const <$> oneof sign s <* notp symbol
+        oper s = Var <$> oneof sign s <* notp symbol
 
 -- expr' :: Parser Expr
 -- -- expr = construct <|> term <* eof
--- -- expr = const (Const "A") <$> string "abc"
+-- -- expr = const (Var "A") <$> string "abc"
 -- expr' = term <* many (sat isSpace) <* eof
 
 -- construct :: Parser Expr
@@ -231,10 +231,10 @@ bind p = (,) <$> p <*> option (sign "=" *> p) >>= f
     where
         f (a, Nothing) = return a
         f (a, Just b)  = case appToList a of
-            [Const s]   -> return $ Bind s b
-            [Data s _]  -> return $ Bind s b
-            Const s:es  -> return $ Bind s $ foldr1 Lambda $ es ++ [b]
-            Data s _:es -> return $ Bind s $ foldr1 Lambda $ es ++ [b]
+            [Var s]     -> return $ Bind s b
+            [Cons s _]  -> return $ Bind s b
+            Var s:es    -> return $ Bind s $ foldr1 Lambda $ es ++ [b]
+            Cons s _:es -> return $ Bind s $ foldr1 Lambda $ es ++ [b]
             _           -> mzero
 
 lambda :: Parser Expr -> OpeParser
@@ -257,52 +257,52 @@ termop ss p = term ss p <|> operator ss
 
 term :: [String] -> OpeParser
 term ss p = sign "(" *> p <* sign ")"
-        <|> App (Const "~") <$> (sign "~" *> term ss p)
-        -- <|> App (Data "-" []) <$> (sign "-" *> term ss p)
+        <|> App (Var "~") <$> (sign "~" *> term ss p)
+        -- <|> App (Cons "-" []) <$> (sign "-" *> term ss p)
         <|> list p
         <|> variable
         <|> (datacons >>= f)
         <|> (constant >>= f)
         <|> float
         <|> number
-        <|> systemConst
-        <|> Const <$> sign "_"
+        <|> systemVar
+        <|> Var <$> sign "_"
         <|> const (Comma []) <$> sign "()"
     where
-        f (Const s) | s `elem` ss = mzero
+        f (Var s) | s `elem` ss = mzero
         f a = return a
 
 operator :: [String] -> Parser Expr
-operator ss = Const <$> oneof sign ss
+operator ss = Var <$> oneof sign ss
 
 list :: OpeParser
 list p = (makeList .) . (++) <$> (sign "[" *> optionL p) <*> many (sign "," *> p) <* sign "]"
     where
         makeList :: [Expr] -> Expr
-        -- makeList = foldr (\a b -> App (App (Data ":" []) a) b) (Data "[]" [])
-        makeList = foldr (\a b -> Data ":" [a, b]) (Data "[]" [])
+        -- makeList = foldr (\a b -> App (App (Cons ":" []) a) b) (Cons "[]" [])
+        makeList = foldr (\a b -> Cons ":" [a, b]) (Cons "[]" [])
 
 variable :: Parser Expr
-variable = Var 0 <$> token ((:) <$> char '_' <*> some (letter <|> digit))
+variable = Param 0 <$> token ((:) <$> char '_' <*> some (letter <|> digit))
 
 constant :: Parser Expr
-constant = Const <$> token (((:) <$> letter <*> many (letter <|> digit))
+constant = Var <$> token (((:) <$> letter <*> many (letter <|> digit))
                             <|> some symbol)
 
 datacons :: Parser Expr
-datacons = (`Data` [])  <$> token ((:) <$> upper <*> many (letter <|> digit))
+datacons = (`Cons` [])  <$> token ((:) <$> upper <*> many (letter <|> digit))
 
-systemConst :: Parser Expr
-systemConst = (`Data` []) <$> token ((:) <$> char '#' <*> many letter)
+systemVar :: Parser Expr
+systemVar = (`Cons` []) <$> token ((:) <$> char '#' <*> many letter)
 
 float :: Parser Expr
 float = toFraction <$> (spaces *> some digit) <* char '.' <*> some digit
     where
-        toFraction xs ys = App (App (Data "/" []) (Data (xs ++ ys) [])) (Data (show $ 10 ^ length ys) [])
+        toFraction xs ys = App (App (Cons "/" []) (Cons (xs ++ ys) [])) (Cons (show $ 10 ^ length ys) [])
         -- toFraction xs ys = Cons "/" [int . read $ xs ++ ys, int $ 10 ^ length ys]
 
 number :: Parser Expr
-number = (`Data` []) <$> (spaces *> some digit)
+number = (`Cons` []) <$> (spaces *> some digit)
 
 -- int :: Integer -> Expr
 -- int i = Cons "_Int" [Bytes i]
