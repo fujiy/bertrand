@@ -257,6 +257,8 @@ termop ss p = term ss p <|> operator ss
 
 term :: [String] -> OpeParser
 term ss p = sign "(" *> p <* sign ")"
+        <|> App (Const "~") <$> (sign "~" *> term ss p)
+        -- <|> App (Data "-" []) <$> (sign "-" *> term ss p)
         <|> list p
         <|> variable
         <|> (datacons >>= f)
