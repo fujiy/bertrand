@@ -1,11 +1,12 @@
-{-# LANGUAGE ExistentialQuantification #-}
+-- {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE LambdaCase #-}
 
-module Bertrand.Data
-    ( Expr(..),  emap
-    , Envir(..), eempty, fmapE, toList
-    , Boolean(..)
-    , Binds,     findBind
-    , ParseOption(..)
+module Bertrand.Data(
+    Expr(..), toList, detach, detachEnv,
+    SystemType(..),
+    Envir(..), emap,
+    Boolean(..),
+    ParseOption(..)
     -- , Thunk(..), thunk
     -- , Memory, Ref, memory, singleton, fromList, newMemory, readMemory, writeMemory
     -- , notf, andf, orf
@@ -15,8 +16,8 @@ module Bertrand.Data
 import Control.Applicative
 import Control.Monad
 -- import Data.Bits
-import Data.List
-import qualified Data.Map as Map
+-- import Data.List
+-- import qualified Data.Map as Map
 
 import Debug.Trace
 
@@ -25,74 +26,87 @@ data ParseOption = Infix Int String
                  | Infixl Int String
                  | Infixr Int String
                  | Infixf Int String
-                 | DataCons String
+                --  | DataCons String
 
 instance Show ParseOption where
     show (Infix i s)  = "infix "  ++ show i ++ " " ++ s
     show (Infixl i s) = "infixl " ++ show i ++ " " ++ s
     show (Infixr i s) = "infixr " ++ show i ++ " " ++ s
     show (Infixf i s) = "infixf " ++ show i ++ " " ++ s
-    show (DataCons s) = "data " ++ s
+    -- show (DataCons s) = "data " ++ s
 
 --------------------------------------------------------------------------------
-data Expr = Var String
-          | Param Int String
-          | Cons String [Expr]
+data Expr = Id String
           | App Expr Expr
           | Lambda Expr Expr
-          | Bind String Expr
-          | Comma [Expr]
-          | Env (Int, Envir) Expr
-          | Decl [Expr] Expr
-    deriving Eq
+          | Env Envir Expr
+          | System SystemType
+
+data SystemType = Int Integer
+                | Func String (SystemType -> Maybe Expr)
 
 instance Show Expr where
-    show (Var s)        = s
-    show (Param i s)    = show i ++ s
-    show (Cons s [])    = '\'' : s
-    show (Cons s es)    = "('" ++ s ++ " " ++ unwords (map show es) ++ ")"
-    show (App a b)      = "(" ++ show a ++ " " ++ show b ++ ")"
-    show (Lambda a b)   = "(\\" ++ show a ++ " -> " ++ show b ++ ")"
-    show (Bind a b)     = a ++ " = " ++ show b
-    show (Comma as)     = "(" ++ intercalate ", " (map show as) ++ ")"
-    show (Decl ds a)    = "(" ++ show a ++ " !! " ++ intercalate "; " (map show ds) ++ ")"
-    show (Env (i, e) a) = "(" ++ show a ++ " ! " ++ show i ++ show e ++ ")"
-    -- show (Env (i, e) a) = show a
+    show = \case
+        Id s       -> s
+        App a b    -> "(" ++ show a ++ " " ++ show b ++ ")"
+        Lambda a b -> "(\\" ++ show a ++ " -> " ++ show b ++ ")"
+        -- Env (Envir [] [] [] _) a -> show a
+        Env e a    -> "(" ++ show a ++ " ! " ++ show e ++ ")"
+        System s   -> show s
 
-emap :: (Expr -> Expr) -> Expr -> Expr
-emap f (Cons s es)  = Cons s (map f es)
-emap f (App a b)    = App (f a) (f b)
-emap f (Lambda a b) = Lambda (f a) (f b)
-emap f (Bind s a)   = Bind s (f a)
-emap f (Comma as)   = Comma (map f as)
-emap f (Decl ds a)  = Decl (map f ds) (f a)
-emap f (Env t a)    = Env t (emap f a)
-emap f a            = a
+instance Show SystemType where
+    show = \case
+        Int i    -> show i
+        Func s f -> '#':s
+
+instance Eq SystemType where
+    Int x    == Int y     = x == y
+    Func s _ == Func s' _ = s == s'
+    _        == _         = False
+
+toList :: Expr -> [Expr]
+toList = \case
+    Env e a -> Env e <$> toList a
+    App a b -> toList a ++ [b]
+    a       -> [a]
+
+detach :: Expr -> Expr
+detach = snd . detachEnv
+
+detachEnv :: Expr -> (Expr -> Expr, Expr)
+detachEnv = \case
+    Env t a -> let (f, a') = detachEnv a
+               in  (Env t . f, a')
+    a       -> (id, a)
 
 --------------------------------------------------------------------------------
-data Envir = Envir [Expr] Binds
-    deriving Eq
+data Envir = Envir { binds :: [(String, Expr)],
+                     decls :: [Expr],
+                     vars  :: [String],
+                     depth :: Int }
+
+instance Eq Envir where
+    ex == ey = depth ex == depth ey
+
+instance Ord Envir where
+    ex <= ey = depth ex <= depth ey
+
+instance Monoid Envir where
+    mempty = Envir [] [] [] 0
+    Envir bs ds vs i `mappend` Envir bs' ds' vs' _
+        = Envir (bs ++ bs') (ds ++ ds') (vs ++ vs') i
 
 instance Show Envir where
-    show (Envir as bs) = show as
-                        -- ++ show (Map.toList bs)
-
-type Binds = Map.Map String [Expr]
-
-eempty :: Envir
-eempty = Envir [] mempty
-
-findBind :: String -> Binds -> [Expr]
-findBind = Map.findWithDefault []
+    show (Envir bs ds _ i) = show i ++ show bs
 
 -- toExprs :: Envir -> [Expr]
 -- toExprs (Envir es _) = es
 
-fmapE :: (Expr -> Expr) -> Envir -> Envir
-fmapE f (Envir as bs) = Envir (fmap f as) (fmap (map f) bs)
-
-toList :: Envir -> [Expr]
-toList (Envir as bs) = as ++ concatMap snd (Map.toList bs)
+emap :: (Expr -> Expr) -> Envir -> Envir
+emap f (Envir bs ds vs i) = Envir (map (mapSnd f) bs) (map f ds) vs i
+--
+-- toList :: Envir -> [Expr]
+-- toList (Envir as bs) = as ++ concatMap snd (Map.toList bs)
 
 --------------------------------------------------------------------------------
 data Boolean = T | F | U deriving Eq
@@ -147,6 +161,9 @@ thunk f = Thunk [f]
     -- Pure x >>= f = f x
 
 --------------------------------------------------------------------------------
+
+mapSnd :: (b -> c) -> (a, b) -> (a, c)
+mapSnd f (a, b) = (a, f b)
 
 -- notf :: (a -> Bool) -> a -> Bool
 -- notf f = not . f

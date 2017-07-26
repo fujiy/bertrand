@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TupleSections #-}
 
 module Bertrand.Parser
     (parse
@@ -15,6 +16,7 @@ import Data.Maybe
 import Debug.Trace
 
 import Bertrand.Data
+import Bertrand.System (systemIds)
 
 
 --------------------------------------------------------------------------------
@@ -23,7 +25,7 @@ import Bertrand.Data
 
 -- runParser = runMaybeT
 
-data Parser a = Parser {runParser :: ParserState -> (Maybe a, ParserState)}
+newtype Parser a = Parser {runParser :: ParserState -> (Maybe a, ParserState)}
 
 instance Functor Parser where
     f `fmap` p = Parser $ \s -> let (m, s') = runParser p s
@@ -108,7 +110,7 @@ eof = do
 
 --------------------------------------------------------------------------------
 
-parse :: [ParseOption] -> String -> Either (Int, Int) Expr
+parse :: [ParseOption] -> String -> Either (Int, Int) Envir
 parse os cs = let (m, ParserState p _) = runParser (parser os) (purePS cs)
               in  maybe (Left p) Right m
 
@@ -116,45 +118,96 @@ parse os cs = let (m, ParserState p _) = runParser (parser os) (purePS cs)
 
 type OpeParser = Parser Expr -> Parser Expr
 
-parser :: [ParseOption] -> Parser Expr
-parser ops = toCons ops <$> expr <* eof
+parser :: [ParseOption] -> Parser Envir
+parser ops = emap (env 0) <$> statement <* eof
     where
+        env :: Int -> Expr -> Expr
+        env i = \case
+            App a b    -> App (env i a) (env i b)
+            Lambda a b -> Lambda (env (i + 1) a) (env (i + 1) b)
+            Env e a    -> Env (emap (env $ i + 1) e {depth = i}) $ env (i + 1) a
+            a          -> a
+
         expr :: Parser Expr
-        expr = foldr id (apply signs expr) opeparsers
+        expr = foldr id apply opeparsers
         -- expr = apply $ head opeparsers $ term expr
 
+        statement :: Parser Envir
+        statement = variable <|> bind <|> declare
+
+        variable :: Parser Envir
+        variable = (\s -> mempty {vars = s})
+                   <$> (sign "var" *> some identifier)
+
+        bind :: Parser Envir
+        bind = (,) <$> expr <*> (sign "=" *> expr) >>= f
+            where
+                f (a, e) = let x:es = toList a in case detach x of
+                    Id s -> return mempty{binds = [(s, foldr Lambda e es)]}
+                    _    -> mzero
+
+
+        -- bind = f <$> identifier <*> many term <*> (sign "=" *> expr)
+        --     where
+        --         f s es e = mempty{binds = [(s, foldr Lambda e es)]}
+
+        declare :: Parser Envir
+        declare = (\e -> mempty {decls = [e]}) <$> expr
 
         opeparsers :: [OpeParser]
-        opeparsers = declaration : bind : lambda (term signs expr) : map opeparser opers
+        opeparsers = envir : lambda term : map opeparser opers
 
         opers = operators ops
 
+        lambda :: Parser Expr -> OpeParser
+        lambda p q = (f <$> (sign "\\" *> some p) <* sign "->" <*> q)
+                     <|> q
+            where
+                f es e = foldr1 Lambda $ es ++ [e]
+
+        envir :: OpeParser
+        envir p = f <$> p <*> option (sign "!" *>
+                  ((:) <$> statement <*> many (sign ";" *> statement)))
+            where
+                f a Nothing   = a
+                f a (Just es) = Env (mconcat es) a
+
+        apply :: Parser Expr
+        apply = foldl App <$> (term <|> operator) <*> many term
+
+        -- termop :: OpeParser
+        -- termop p = term <|> operator
+
+        term :: Parser Expr
+        term = sign "(" *> expr <* sign ")"
+                -- <|> App (Id "~") <$> (sign "~" *> term)
+                <|> list
+                <|> float
+                <|> number
+                <|> systemId
+                <|> Id <$> (identifier <|> wildcard <|> sign "()")
+
         signs :: [String]
-        signs = "!":"=":";":"\\":"->":",": foldr (\(is, ils, irs, ifs) s -> is ++ ils ++ irs ++ ifs ++ s) [] opers
+        signs = "!":";":"\\":"->":",":
+                foldr (\(is, ils, irs, ifs) s -> is ++ ils ++ irs ++ ifs ++ s) [] opers
 
-toCons :: [ParseOption] -> Expr -> Expr
-toCons ops = \case
-    Var s -> if s `elem` consts then Cons s [] else Var s
-    a       -> emap (toCons ops) a
-    where
-        consts :: [String]
-        consts = mapMaybe (\case
-            DataCons s -> Just s
-            _          -> Nothing) ops
+        operator :: Parser Expr
+        operator = Id <$> oneof sign signs
 
-        -- replaceCons :: Expr -> Expr
-        -- replaceCons a = case appToList a of
-        --     Var s : es | s `elem` dataconses
-        --         -> Cons s (map replaceCons es)
-        --     _   -> emap replaceCons a
+        identifier :: Parser String
+        identifier = token ((:) <$> letter <*> many (letter <|> digit))
+                     >>= \s -> if s `elem` signs
+                               then mzero
+                               else return s
 
-appToList :: Expr -> [Expr]
-appToList (App a b) = appToList a ++ [b]
-appToList a         = [a]
+        wildcard :: Parser String
+        wildcard = token ((:) <$> char '_' <*> many (letter <|> digit))
 
-listToApp :: [Expr] -> Expr
-listToApp = foldl1 App
-
+        list :: Parser Expr
+        list = (makeList .) . (++) <$> (sign "[" *> optionL expr) <*> many (sign "," *> expr) <* sign "]"
+            where
+                makeList :: [Expr] -> Expr
+                makeList = foldr (app2 (Id ":")) (Id "[]")
 
 operators :: [ParseOption] -> [([String], [String], [String], [String])]
 operators = M.elems . foldr f M.empty
@@ -164,7 +217,6 @@ operators = M.elems . foldr f M.empty
         f (Infixl i s) = M.insertWith (const $ map2nd (s:)) i ([], [s], [], [])
         f (Infixr i s) = M.insertWith (const $ map3rd (s:)) i ([], [], [s], [])
         f (Infixf i s) = M.insertWith (const $ map4th (s:)) i ([], [], [], [s])
-        f _ = id
 
         map1st f (a, b, c, d) = (f a, b, c, d)
         map2nd f (a, b, c, d) = (a, f b, c, d)
@@ -174,9 +226,6 @@ operators = M.elems . foldr f M.empty
 --            infix     infixl    infixr    infixf
 opeparser :: ([String], [String], [String], [String]) -> OpeParser
 opeparser (is, ils, irs, ifs) p = infixp $ infixlp $ infixrp $ infixfp p
-    -- p <*> some (oneof ils )
-
-
     where
         infixp :: OpeParser
         infixp p = f <$> p <*> option ((,) <$> oper is <*> option p)
@@ -209,103 +258,25 @@ opeparser (is, ils, irs, ifs) p = infixp $ infixlp $ infixrp $ infixfp p
                 f [a]       = a
                 f [a, o]    = App o a
                 f [a, o, b] = App (App o a) b
-                f (a:o:b:x) = App (App (Var "and") $ f [a, o, b]) $ f (b:x)
+                f (a:o:b:x) = App (App (Id "and") $ f [a, o, b]) $ f (b:x)
                 g :: Parser [Expr]
                 g = (:) <$> p <*> (concat <$> optionL ((:) <$> oper ifs <*> g))
 
-        oper s = Var <$> oneof sign s <* notp symbol
+        oper s = Id <$> oneof sign s <* notp symbol
 
--- expr' :: Parser Expr
--- -- expr = construct <|> term <* eof
--- -- expr = const (Var "A") <$> string "abc"
--- expr' = term <* many (sat isSpace) <* eof
+systemId :: Parser Expr
+systemId = token (char '#' *> many letter) >>=
+               (\s -> maybe mzero return $ System <$> lookup s systemIds)
 
--- construct :: Parser Expr
--- construct = Cons <$> atom <*> many term
---
--- atom :: Parser String
--- atom = token $ (:) <$> upper <*> many (letter <|> digit)
-
-bind :: OpeParser
-bind p = (,) <$> p <*> option (sign "=" *> p) >>= f
-    where
-        f (a, Nothing) = return a
-        f (a, Just b)  = case appToList a of
-            [Var s]     -> return $ Bind s b
-            [Cons s _]  -> return $ Bind s b
-            Var s:es    -> return $ Bind s $ foldr1 Lambda $ es ++ [b]
-            Cons s _:es -> return $ Bind s $ foldr1 Lambda $ es ++ [b]
-            _           -> mzero
-
-lambda :: Parser Expr -> OpeParser
-lambda p q = (f <$> (sign "\\" *> some p) <* sign "->" <*> q)
-             <|> q
-    where
-        f es e = foldr1 Lambda $ es ++ [e]
-
-declaration :: OpeParser
-declaration p = f <$> p <*> option (sign "!" *> ((:) <$> declaration p <*> many (sign ";" *> declaration p)))
-    where
-        f a Nothing   = a
-        f a (Just ds) = Decl ds a
-
-apply :: [String] -> OpeParser
-apply ss p = foldl App <$> termop ss p <*> many (term ss p)
-
-termop :: [String] -> OpeParser
-termop ss p = term ss p <|> operator ss
-
-term :: [String] -> OpeParser
-term ss p = sign "(" *> p <* sign ")"
-        <|> App (Var "~") <$> (sign "~" *> term ss p)
-        -- <|> App (Cons "-" []) <$> (sign "-" *> term ss p)
-        <|> list p
-        <|> variable
-        <|> (datacons >>= f)
-        <|> (constant >>= f)
-        <|> float
-        <|> number
-        <|> systemVar
-        <|> Var <$> sign "_"
-        <|> const (Comma []) <$> sign "()"
-    where
-        f (Var s) | s `elem` ss = mzero
-        f a = return a
-
-operator :: [String] -> Parser Expr
-operator ss = Var <$> oneof sign ss
-
-list :: OpeParser
-list p = (makeList .) . (++) <$> (sign "[" *> optionL p) <*> many (sign "," *> p) <* sign "]"
-    where
-        makeList :: [Expr] -> Expr
-        -- makeList = foldr (\a b -> App (App (Cons ":" []) a) b) (Cons "[]" [])
-        makeList = foldr (\a b -> Cons ":" [a, b]) (Cons "[]" [])
-
-variable :: Parser Expr
-variable = Param 0 <$> token ((:) <$> char '_' <*> some (letter <|> digit))
-
-constant :: Parser Expr
-constant = Var <$> token (((:) <$> letter <*> many (letter <|> digit))
-                            <|> some symbol)
-
-datacons :: Parser Expr
-datacons = (`Cons` [])  <$> token ((:) <$> upper <*> many (letter <|> digit))
-
-systemVar :: Parser Expr
-systemVar = (`Cons` []) <$> token ((:) <$> char '#' <*> many letter)
 
 float :: Parser Expr
-float = toFraction <$> (spaces *> some digit) <* char '.' <*> some digit
+float = token (toFraction <$> some digit <* char '.' <*> some digit)
     where
-        toFraction xs ys = App (App (Cons "/" []) (Cons (xs ++ ys) [])) (Cons (show $ 10 ^ length ys) [])
-        -- toFraction xs ys = Cons "/" [int . read $ xs ++ ys, int $ 10 ^ length ys]
+        toFraction xs ys = app2 (Id "/") (System . Int . read $ xs ++ ys)
+                                (System . Int $ 10 ^ length ys)
 
 number :: Parser Expr
-number = (`Cons` []) <$> (spaces *> some digit)
-
--- int :: Integer -> Expr
--- int i = Cons "_Int" [Bytes i]
+number = System . Int . read <$> token (some digit)
 
 sign :: String -> Parser String
 sign s = token $ string s
@@ -348,6 +319,9 @@ optionL p = maybeToList <$> option p
 oneof :: (a -> Parser b) -> [a] -> Parser b
 oneof p = foldl (\q a -> q <|> p a) mzero
 
+
+app2 :: Expr -> Expr -> Expr -> Expr
+app2 a b = App (App a b)
 
 -- or :: (a -> Bool) -> (a -> Bool) -> a -> Bool
 -- f `or` g = \a -> f a || g a

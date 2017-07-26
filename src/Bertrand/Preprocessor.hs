@@ -26,9 +26,9 @@ line s = case words s of
             _        -> Left s
         where
             m = maybeRead n
-    [x, o] -> case x of
-            "data" -> Right $ DataCons o
-            _      -> Left s
+    -- [x, o] -> case x of
+    --         "data" -> Right $ DataCons o
+    --         _      -> Left s
 
     _ -> Left s
 

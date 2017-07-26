@@ -20,6 +20,7 @@ library
                      , Bertrand.Shell
                      , Bertrand.Data
                      , Bertrand.Preprocessor
+                     , Bertrand.System
                      , Bertrand.Parser
                      , Bertrand.Interpreter
   build-depends:       base >= 4.7 && < 5
