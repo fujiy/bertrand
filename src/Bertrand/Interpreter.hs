@@ -94,8 +94,9 @@ tunnelEnv f g (a, b) = case a of
 envir :: Envir -> Expr -> Expr
 envir env = \case
     Env env' a | depth env >= depth env'
-        -> Env env' a
-    a   -> Env env a
+             -> Env env' a
+    System s -> System s
+    a        -> Env env a
 
 -- modify :: (Envir -> Envir) -> Interpreter a ()
 -- modify f _ = ST.modify (mapSnd f)
@@ -104,7 +105,7 @@ envir env = \case
 -- Show function --
 
 evalShow :: Expr -> String
-evalShow e = show $ evaluate eval e
+evalShow e = show $ evaluate evalAll e
 
 reasonShow :: Expr -> String
 -- reasonShow e = show $ evaluate boolean (envir e)
@@ -113,10 +114,9 @@ reasonShow e = undefined
 evalAll :: Evaluator Expr [Expr]
 evalAll e = do
     es <- eval e
-    flip concatMapM es $ \case
-        App a b   -> zipWith App <$> evalAll a <*> evalAll b
-        Env env a -> fmap (Env env) <$> evalAll a
-        a         -> return [a]
+    flip concatMapM es $ diveEnv fmap $ \case
+        App a b -> zipWith App <$> evalAll a <*> evalAll b
+        a       -> return [a]
 
 -- evalAll e = do
 --     e' <- eval e
@@ -137,12 +137,18 @@ eval e =
     (diveEnv map $ \case
     -- Env env a -> map (envir env) <$> subEnvir env (eval a)
     Id s -> do
-        bs <- concatMap (\env -> map (depth env ,) $ lookups s $ binds env)
+        envs <- filter ((>= -1) . depth) <$> envirs
+        -- envs <- envirs
+        bs <- concatMap (\env -> map (depth env + 1 ,) $ lookups s $ binds env)
               <$> envirs
         if notNull bs
-        then mapEval $ map (\(i, e) -> envir mempty{depth = i + 1} e) bs
+        then
+            -- (\es' -> trace (show (Id s) ++ "\n=> " ++ show es' ++ "\n!  " ++ show envs) es') <$>
+            (mapEval $ map (\(i, e) -> envir mempty{depth = i + 1} e) bs)
         else return [Id s]
     App a b -> do
+        envs <- filter ((>= -1) . depth) <$> envirs
+        -- envs <- envirs
         as <- eval a
         -- ss <- evalSystem $ App a b
         -- let ss = []
@@ -151,10 +157,12 @@ eval e =
             ss = filter isSystemF as
         if null ls && null ss
         then return $ map (flip App b) as
-        else do
+        else
+            -- (\es' -> trace (show (App a b) ++ "\n=> " ++ show es' ++ "\n!  " ++ show envs) es') <$>
+             do
             bs <- if null ss then return [b] else eval b
             fs <- lambdaTree ls
-            es <- concatMapM (\b' -> applyTree (fs, b')) bs
+            es <- nub <$> concatMapM (\b' -> applyTree (fs, b')) bs
             let ss' = catMaybes (applySystemF <$> ss <*> bs)
             (ss' ++) <$> concatMapM eval es
             -- envs <- filter ((>= 0) . depth) <$> envirs
@@ -205,10 +213,13 @@ eval e =
         apply :: Evaluator (Expr, Expr) (Maybe Expr)
         apply (a, b) = do
             i <- currentDepth
-            envs <- takeWhile (\env -> depth env > depthOf i a) <$> envirs
+            es <- filter ((>= 0) . depth) <$> envirs
+            envs <- takeWhile (\env -> depth env >= depthOf i a) <$> envirs
             let b' = foldl (flip Env) b envs
+            -- (\e' -> trace (show (a, b) ++ "\n=> " ++ show e' ++ "\n  " ++ show es) e') <$>
             tunnelEnv fmap (
                 \(Lambda a b, e) -> do
+                    envs <- filter ((>= 0) . depth) <$> envirs
                     i <- currentDepth
                     m <- match (a, e)
                     return $ (\s -> Env mempty{binds = s, depth = i + 1} b) <$> m)
@@ -323,14 +334,14 @@ match (a, b) = eval a >>= mconcatMapM
                     (return . diveEnv' (const id) (\case
                         System s' | s == s' -> Just []
                         _                   -> Nothing ))
-
-            -- App _ _ -> let
-            --     as = toList a
-            --     bs = toList b
-            --     in if length as == length bs
-            --         then fmap concat . sequence <$>
-            --              mapM match (zip as bs)
-            --         else return Nothing
+            App _ _ ->
+                eval b >>= mconcatMapM (\b' ->
+                    let as = toList a
+                        bs = toList b'
+                    in if length as == length bs
+                        then fmap concat . sequence <$>
+                            mapM match (zip as bs)
+                        else return Nothing)
 
             _ -> return Nothing ) . (, b))
     where

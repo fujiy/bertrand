@@ -41,6 +41,7 @@ data Expr = Id String
           | Lambda Expr Expr
           | Env Envir Expr
           | System SystemType
+    deriving Eq
 
 data SystemType = Int Integer
                 | Func String (SystemType -> Maybe Expr)
@@ -50,8 +51,8 @@ instance Show Expr where
         Id s       -> s
         App a b    -> "(" ++ show a ++ " " ++ show b ++ ")"
         Lambda a b -> "(\\" ++ show a ++ " -> " ++ show b ++ ")"
-        -- Env (Envir [] [] [] _) a -> show a
-        Env e a    -> "(" ++ show a ++ " ! " ++ show e ++ ")"
+        Env e a     -> show a
+        -- Env e a    -> "(" ++ show a ++ " ! " ++ show e ++ ")"
         System s   -> show s
 
 instance Show SystemType where
