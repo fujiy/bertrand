@@ -4,7 +4,7 @@ module Bertrand.Preprocessor
     ) where
 
 import Control.Applicative
-import Data.List
+-- import Data.List
 import Data.Maybe
 import Data.Either
 

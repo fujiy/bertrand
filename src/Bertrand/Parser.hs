@@ -13,7 +13,8 @@ import Control.Monad
 import Data.Char
 import qualified Data.Map as M
 import Data.Maybe
-import Debug.Trace
+
+-- import Debug.Trace
 
 import Bertrand.Data
 import Bertrand.System (systemIds)

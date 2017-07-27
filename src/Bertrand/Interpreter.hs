@@ -17,13 +17,12 @@ import Control.Monad.Extra
 import Control.Monad.Reader
 -- import Control.Monad.State
 import Data.Bool
-import Data.Char (isLower)
+import Data.Char
 import Data.Either
--- import Data.List
-import Data.List.Extra
+import Data.List
+-- import Data.List.Extra
 -- import qualified Data.Map as Map
 import Data.Maybe
-import Data.Monoid
 -- import Data.Monoid
 import Data.Tree
 -- import Data.Tuple
