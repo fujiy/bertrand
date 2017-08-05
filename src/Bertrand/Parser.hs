@@ -134,26 +134,29 @@ parser ops = emap (env 0) <$> statement <* eof
         -- expr = apply $ head opeparsers $ term expr
 
         statement :: Parser Envir
-        statement = variable <|> bind <|> declare
+        statement = variable
+                <|> constraint
+                <|> bind
+                <|> declare
 
         variable :: Parser Envir
-        variable = (\s -> mempty {vars = s})
-                   <$> (sign "var" *> some identifier)
+        variable = (\s -> mempty{vars = s}) <$>
+                       (sign "var" *> some identifier)
+
+        constraint :: Parser Envir
+        constraint = (\ss e -> mempty{cstrs = M.fromList $ map (, [e]) ss,
+                                      decls = [(ss, e)]}) <$>
+                         some identifier <* sign "." <*> expr
 
         bind :: Parser Envir
         bind = (,) <$> expr <*> (sign "=" *> expr) >>= f
             where
                 f (a, e) = let x:es = toList a in case detach x of
-                    Id s -> return mempty{binds = [(s, foldr Lambda e es)]}
+                    Id s -> return mempty{binds = M.singleton s [foldr Lambda e es]}
                     _    -> mzero
 
-
-        -- bind = f <$> identifier <*> many term <*> (sign "=" *> expr)
-        --     where
-        --         f s es e = mempty{binds = [(s, foldr Lambda e es)]}
-
         declare :: Parser Envir
-        declare = (\e -> mempty {decls = [e]}) <$> expr
+        declare = (\e -> mempty{decls = [([], e)]}) <$> expr
 
         opeparsers :: [OpeParser]
         opeparsers = envir : lambda term : map opeparser opers
@@ -181,8 +184,9 @@ parser ops = emap (env 0) <$> statement <* eof
 
         term :: Parser Expr
         term = sign "(" *> expr <* sign ")"
-                -- <|> App (Id "~") <$> (sign "~" *> term)
+                <|> App (Id "~") <$> (sign "~" *> term)
                 <|> list
+                <|> ifelse
                 <|> float
                 <|> number
                 <|> systemId
@@ -196,7 +200,7 @@ parser ops = emap (env 0) <$> statement <* eof
         operator = Id <$> oneof sign signs
 
         identifier :: Parser String
-        identifier = token ((:) <$> letter <*> many (letter <|> digit))
+        identifier = token ((:) <$> (letter <|> char '#') <*> many (letter <|> digit))
                      >>= \s -> if s `elem` signs
                                then mzero
                                else return s
@@ -209,6 +213,10 @@ parser ops = emap (env 0) <$> statement <* eof
             where
                 makeList :: [Expr] -> Expr
                 makeList = foldr (app2 (Id ":")) (Id "[]")
+
+        ifelse :: Parser Expr
+        ifelse = (\c a b -> App (App (App (Id "#if") c) a) b) <$>
+                 (sign "if" *> expr) <*> (sign "then" *> expr) <*> (sign "else" *> expr)
 
 operators :: [ParseOption] -> [([String], [String], [String], [String])]
 operators = M.elems . foldr f M.empty

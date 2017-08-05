@@ -17,7 +17,7 @@ import Control.Applicative
 import Control.Monad
 -- import Data.Bits
 -- import Data.List
--- import qualified Data.Map as Map
+import qualified Data.Map as M
 
 import Debug.Trace
 
@@ -81,9 +81,10 @@ detachEnv = \case
     a       -> (id, a)
 
 --------------------------------------------------------------------------------
-data Envir = Envir { binds :: [(String, Expr)],
-                     decls :: [Expr],
-                     vars  :: [String],
+data Envir = Envir { binds :: M.Map String [Expr], -- Binds
+                     cstrs :: M.Map String [Expr], -- Constraints
+                     decls :: [([String], Expr)],            -- Declarations
+                     vars  :: [String],          -- Variables
                      depth :: Int }
 
 instance Eq Envir where
@@ -93,18 +94,20 @@ instance Ord Envir where
     ex <= ey = depth ex <= depth ey
 
 instance Monoid Envir where
-    mempty = Envir [] [] [] 0
-    Envir bs ds vs i `mappend` Envir bs' ds' vs' _
-        = Envir (bs ++ bs') (ds ++ ds') (vs ++ vs') i
+    mempty = Envir mempty mempty [] [] 0
+    Envir bs cs ds vs i `mappend` Envir bs' cs' ds' vs' _
+        = Envir (M.unionWith (++) bs bs') (M.unionWith (++) cs cs')
+                (ds ++ ds') (vs ++ vs') i
 
 instance Show Envir where
-    show (Envir bs ds _ i) = show i ++ show bs
+    show (Envir bs cs ds _ i) =
+        show i ++ show (M.toList bs) ++ show (M.toList cs) ++ show ds
 
 -- toExprs :: Envir -> [Expr]
 -- toExprs (Envir es _) = es
 
 emap :: (Expr -> Expr) -> Envir -> Envir
-emap f (Envir bs ds vs i) = Envir (map (mapSnd f) bs) (map f ds) vs i
+emap f (Envir bs cs ds vs i) = Envir (map f <$> bs) (map f <$> cs) (map (mapSnd f) ds) vs i
 --
 -- toList :: Envir -> [Expr]
 -- toList (Envir as bs) = as ++ concatMap snd (Map.toList bs)

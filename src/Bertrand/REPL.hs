@@ -5,10 +5,12 @@ module Bertrand.REPL
 
 import System.IO
 import Control.Monad
+import Control.Monad.Extra
 -- import Control.Monad.State
 import Data.Either
 import Data.Maybe
 import Data.Monoid
+import qualified Data.Map as M
 
 import Bertrand.Shell
 import Bertrand.Data
@@ -40,10 +42,21 @@ repl = shell sdesc (REPLST mempty [])
 cmds :: [(String, CommandFunc REPLST)]
 cmds = [("help",    const $ outputStrLn helptext),
         ("?",       const $ outputStrLn helptext),
-        ("clear",   const $ do put mempty
-                               outputStrLn "cleared all declarations"),
-        ("options", const $ do REPLST _ ops <- get
-                               outputStr $ unlines . map show $ ops)
+        ("clear",   const $ do
+            put mempty
+            outputStrLn "cleared all declarations"),
+        ("options", const $ do
+            REPLST _ ops <- get
+            outputStr $ unlines . map show $ ops),
+        ("decls",   const $ do
+            REPLST env _ <- get
+            outputStr $ unlines . map show $ decls env),
+        ("binds",   const $ do
+            REPLST env _ <- get
+            outputStr $ unlines . map show . M.toList $ binds env),
+        ("variables", const $ do
+            REPLST env _ <- get
+            outputStr $ unlines . map show $ vars env)
         ]
 
 evalF :: String -> Shell REPLST ()
@@ -57,23 +70,25 @@ evalF xs = case last xs of
                   (\e -> modify (`mappend` REPLST e [])) m
             s <- get
             traceShow s $ return ()
-    -- '?' -> case preprocess (init xs) of
-    --     ("", _) -> return ()
-    --     (s,  _) -> do
-    --         m <- parseS $ init s
-    --         REPLST es _ <- get
-    --         maybe (return ())
-    --               (outputStrLn . reasonShow . Decl (fst prelude) . Decl es) m
+    '?' -> case preprocess (init xs) of
+        ("", _) -> return ()
+        (s,  _) -> do
+            m <- parseS $ "it = ternary (" ++ init s ++ ")"
+            whenJust m $ \e -> do
+                let a = head . fromJust . M.lookup "it" $ binds e
+                REPLST env _ <- get
+                outputStrLn . evalShow .
+                    Env (fst preludeM){depth = -2} $ Env env{depth = -1} a
     _   -> case preprocess xs of
         ("", _) -> return ()
         (s,  _) -> do
-            m <- parseS $ init ("it = " ++ s)
-            REPLST e _ <-  get
-            outputStrLn $ show m
-            maybe (return ())
-                  (outputStrLn . evalShow .
-                   Env (fst preludeM){depth = -2} . Env e{depth = -1} .
-                   fromJust . lookup "it" . binds) m
+            m <- parseS $ "it = " ++ init s
+            whenJust m $ \e -> do
+                let a = head . fromJust . M.lookup "it" $ binds e
+                REPLST env _ <- get
+                outputStrLn $ show a
+                outputStrLn . evalShow .
+                    Env (fst preludeM){depth = -2} $ Env env{depth = -1} a
 
 parseS :: String -> Shell REPLST (Maybe Envir)
 parseS s = do

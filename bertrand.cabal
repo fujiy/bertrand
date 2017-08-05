@@ -17,12 +17,13 @@ library
   hs-source-dirs:      src
   exposed-modules:     Bertrand
                      , Bertrand.REPL
-                     , Bertrand.Shell
-                     , Bertrand.Data
                      , Bertrand.Preprocessor
-                     , Bertrand.System
                      , Bertrand.Parser
                      , Bertrand.Interpreter
+                     , Bertrand.Data
+                     , Bertrand.System
+                     , Bertrand.Shell
+                    --  , Bertrand.BFSearch
   build-depends:       base >= 4.7 && < 5
                      , mtl
                      , containers
