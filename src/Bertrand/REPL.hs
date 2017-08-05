@@ -48,12 +48,19 @@ cmds = [("help",    const $ outputStrLn helptext),
         ("options", const $ do
             REPLST _ ops <- get
             outputStr $ unlines . map show $ ops),
-        ("decls",   const $ do
+        ("binds", \ss -> do
+            REPLST env _ <- get
+            outputStr $ if null ss
+            then unlines . map show . M.toList $ binds env
+            else unlines . map show . concat . M.lookup (head ss) $ binds env),
+        ("cstrs", \ss -> do
+            REPLST env _ <- get
+            outputStr $ if null ss
+            then unlines . map show . M.toList $ cstrs env
+            else unlines . map show . concat . M.lookup (head ss) $ cstrs env),
+        ("decls", const $ do
             REPLST env _ <- get
             outputStr $ unlines . map show $ decls env),
-        ("binds",   const $ do
-            REPLST env _ <- get
-            outputStr $ unlines . map show . M.toList $ binds env),
         ("variables", const $ do
             REPLST env _ <- get
             outputStr $ unlines . map show $ vars env)
@@ -146,10 +153,14 @@ helptext :: String
 helptext =
     " Commands available from the prompt:\n\
     \\n\
-    \   <expr>         evaluate and display <expr>\n\
-    \   <expr> .       declare that <expr> is true\n\
-    \   <expr> ?       display <expr> is true, false or undefined\n\
-    \   :clear         clear all declarations\n\
-    \   :help, :?      display this list of commands\n\
-    \   :options       display all parse options\n\
-    \   :quit          exit Bertrand Interpreter"
+    \   <expr>          evaluate and display <expr>\n\
+    \   <expr> ?        display <expr> is true, false or undefined\n\
+    \   <statement> .   declare that <statement> is true\n\
+    \   :binds [<name>] display bindings of <name>\n\
+    \   :clear          clear all declaretions\n\
+    \   :cstrs [<name>] display constraints of <name>\n\
+    \   :decls          display all declarations\n\
+    \   :options        display all parse options\n\
+    \\n\
+    \   :help, :?       display this list of commands\n\
+    \   :quit           exit Bertrand Interpreter"
