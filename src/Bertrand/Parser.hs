@@ -140,13 +140,15 @@ parser ops = emap (env 0) <$> statement <* eof
                 <|> declare
 
         variable :: Parser Envir
-        variable = (\s -> mempty{vars = s}) <$>
-                       (sign "var" *> some identifier)
+        variable = (\s ss -> mempty{vars = case s of
+                       "var"  -> (ss, [])
+                       "cons" -> ([], ss)}) <$>
+                       oneof string ["var", "cons"] <*> some identifier'
 
         constraint :: Parser Envir
         constraint = (\ss e -> mempty{cstrs = M.fromList $ map (, [e]) ss,
                                       decls = [(ss, e)]}) <$>
-                         some identifier <* sign "." <*> expr
+                         some identifier' <* sign "." <*> expr
 
         bind :: Parser Envir
         bind = (,) <$> expr <*> (sign "=" *> expr) >>= f
@@ -200,10 +202,15 @@ parser ops = emap (env 0) <$> statement <* eof
         operator = Id <$> oneof sign signs
 
         identifier :: Parser String
-        identifier = token ((:) <$> (letter <|> char '#') <*> many (letter <|> digit))
+        identifier = token ((:) <$> (letter <|> char '#') <*>
+                                         many (letter <|> digit))
                      >>= \s -> if s `elem` signs
                                then mzero
                                else return s
+
+        identifier' :: Parser String
+        identifier' = token ((:) <$> (letter <|> char '#') <*>
+                                         many (letter <|> digit))
 
         wildcard :: Parser String
         wildcard = token ((:) <$> char '_' <*> many (letter <|> digit))

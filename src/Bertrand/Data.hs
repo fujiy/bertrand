@@ -18,6 +18,7 @@ import Control.Monad
 -- import Data.Bits
 -- import Data.List
 import qualified Data.Map as M
+import Data.Monoid
 
 import Debug.Trace
 
@@ -45,6 +46,7 @@ data Expr = Id String
 
 data SystemType = Int Integer
                 | Func String (SystemType -> Maybe Expr)
+                | Pred String (SystemType -> Maybe Expr)
 
 instance Show Expr where
     show = \case
@@ -59,6 +61,7 @@ instance Show SystemType where
     show = \case
         Int i    -> show i
         Func s f -> '#':s
+        -- Pred
 
 instance Eq SystemType where
     Int x    == Int y     = x == y
@@ -83,8 +86,8 @@ detachEnv = \case
 --------------------------------------------------------------------------------
 data Envir = Envir { binds :: M.Map String [Expr], -- Binds
                      cstrs :: M.Map String [Expr], -- Constraints
-                     decls :: [([String], Expr)],            -- Declarations
-                     vars  :: [String],          -- Variables
+                     decls :: [([String], Expr)],  -- Declarations
+                     vars  :: ([String], [String]),            -- Variables
                      depth :: Int }
 
 instance Eq Envir where
@@ -94,10 +97,10 @@ instance Ord Envir where
     ex <= ey = depth ex <= depth ey
 
 instance Monoid Envir where
-    mempty = Envir mempty mempty [] [] 0
+    mempty = Envir mempty mempty [] mempty 0
     Envir bs cs ds vs i `mappend` Envir bs' cs' ds' vs' _
         = Envir (M.unionWith (++) bs bs') (M.unionWith (++) cs cs')
-                (ds ++ ds') (vs ++ vs') i
+                (ds ++ ds') (vs <> vs') i
 
 instance Show Envir where
     show (Envir bs cs ds _ i) =

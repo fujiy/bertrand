@@ -63,7 +63,8 @@ cmds = [("help",    const $ outputStrLn helptext),
             outputStr $ unlines . map show $ decls env),
         ("variables", const $ do
             REPLST env _ <- get
-            outputStr $ unlines . map show $ vars env)
+            outputStrLn $ "var: "  ++ (unwords . map show . fst $ vars env)
+            outputStrLn $ "cons: " ++ (unwords . map show . snd $ vars env) )
         ]
 
 evalF :: String -> Shell REPLST ()

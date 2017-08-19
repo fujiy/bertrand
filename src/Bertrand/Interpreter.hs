@@ -114,6 +114,9 @@ diveEnv f g = \case
     Env env a -> f (envir env) $ diveEnv f g a
     e         -> g e
 
+diveEnvM_ :: Evaluator Expr a -> Evaluator Expr a
+diveEnvM_ = diveEnvM (const id)
+
 diveEnv_ :: (Expr -> a) -> Expr -> a
 diveEnv_ = diveEnv (const id)
 
@@ -328,8 +331,8 @@ match (a, b) = evalAfter a $
 
 isVar :: Evaluator String Bool
 isVar s | length s < 4 && all isLower s
-        = return True
-isVar s = elem s . concatMap vars <$> envirs
+        = notElem s . concatMap (snd . vars) <$> envirs
+isVar s = elem s . concatMap (fst . vars) <$> envirs
 
 -- match (a, b) = do
 --     (fa, ea) <- detachEnv <$> eval a
@@ -410,7 +413,14 @@ infer e = (\t -> traceShow ('i', e, t) t) <$> ((do
     ds <- concatMap (\env -> map (mapSnd $ shieldWith env) $
               decls env) <$> envirs
     -- ds <- envirsWith (map snd . decls)
-    asum <$> mapM (\(ss, d) -> matchR ss (d, e)) ds
+    -- infer (App (App (Id "=>") (Id "true")) e)
+    asum <$> mapM (\(ss, d) ->
+        (<|>) <$> matchR ss (d, e) <*>
+            (case toList d of
+                b:_ | not (isName "=>" b) -> return $ pure False
+                [_, b, c] -> (\x y -> (&&) <$> x <*> y) <$>
+                    matchR [] (c, e) <*> matchR [] (Id "true", b)
+                _ -> return $ pure False) ) ds
     ) >>= \case
     Pure a   -> return a
     Thunk fs -> go fs)
@@ -423,9 +433,14 @@ infer e = (\t -> traceShow ('i', e, t) t) <$> ((do
             Pure False -> go fs
             Thunk fs'  -> go $ fs ++ fs'
 
+        isName :: String -> Expr -> Bool
+        isName s = diveEnv_ (\case
+            Id s' -> s' == s
+            _     -> False )
+
 matchR :: [String] -> Evaluator (Expr, Expr) (Thunk Bool)
 matchR ss = tunnelEnv (const id)
-    (\(a, b) -> case a of
+    (\(a, b) -> traceShow ('m', a, b) $ case a of
         Id s -> do
             let wc = head s == '_'
                 s' = if wc then tail s else s
