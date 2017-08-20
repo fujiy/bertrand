@@ -139,7 +139,7 @@ shield :: Int -> Expr -> Expr
 shield i = envir mempty{depth = i + 1}
 
 shieldWith :: Envir -> Expr -> Expr
-shieldWith env = shield $ depth env + 1
+shieldWith env = shield $ depth env
 
 --------------------------------------------------------------------------------
 -- Show function --
@@ -158,11 +158,12 @@ evalAll e = do
 -- Evaluator --
 
 eval :: Evaluator Expr [Expr]
-eval =
+eval e =
     -- (\e' -> trace (unwords [show e, "=>" ,show e']) e') <$>
+    (
     diveEnvM map $ \case
     Id s -> do
-        envs <- filter ((>= -1) . depth) <$> envirs
+        -- envs <- filter ((>= -1) . depth) <$> envirs
         -- envs <- envirs
         bs <- concatMap (\env -> map (shieldWith env) .
                       concat . lookup s $ binds env) <$> envirs
@@ -191,7 +192,7 @@ eval =
             (ss' ++) <$> concatMapM eval es
             -- envs <- filter ((>= 0) . depth) <$> envirs
             -- return $ traceShow (e, es, ss, e', envs) e'
-    a -> return [a]
+    a -> return [a] ) e
 
     where
         -- mapEval :: Evaluator [Expr] [Expr]
@@ -220,18 +221,18 @@ eval =
                 defaultL _ as = as
 
         apply :: Evaluator (Expr, Expr) (Maybe Expr)
-        apply (a, b) = do
+        apply (a, b) = (\e -> traceShow ('a', a, b, e) e) <$> do
             i <- currentDepth
-            es <- filter ((>= 0) . depth) <$> envirs
-            envs <- takeWhile (\env ->
-                        depth env >= depthOf i a) <$> envirs
-            let b' = foldl (flip Env) b envs
+            envs <- envirs
+            -- envs <- takeWhile (\env ->
+            --             depth env >= depthOf i a) <$> envirs
+            let b' = traceShow ('i', a, b, i) $ foldl (flip Env) b envs
             -- (\e' -> trace (show (a, b) ++ "\n=> " ++ show e' ++ "\n  " ++ show es) e') <$>
             tunnelEnv fmap (
                 \(Lambda a b, e) -> do
                     i <- currentDepth
                     m <- fmap fromList <$> match (a, e)
-                    return $ (\x -> Env
+                    traceShow ('t', i, m) <$> return $ (\x -> Env
                         mempty{binds = x, depth = i + 1} b) <$> m)
                 (a, b')
 

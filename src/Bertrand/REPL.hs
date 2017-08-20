@@ -73,7 +73,7 @@ evalF xs = case last xs of
     '.' -> case preprocess (init xs) of
         ("", op) -> modify (`mappend` REPLST mempty op)
         (s,  _)  -> do
-            m <- parseS $ init s
+            m <- parseS 0 $ init s
             maybe (return ())
                   (\e -> modify (`mappend` REPLST e [])) m
             s <- get
@@ -81,7 +81,7 @@ evalF xs = case last xs of
     '?' -> case preprocess (init xs) of
         ("", _) -> return ()
         (s,  _) -> do
-            m <- parseS $ "it = ternary (" ++ init s ++ ")"
+            m <- parseS 0 $ "it = ternary (" ++ init s ++ ")"
             whenJust m $ \e -> do
                 let a = head . fromJust . M.lookup "it" $ binds e
                 REPLST env _ <- get
@@ -90,7 +90,7 @@ evalF xs = case last xs of
     _   -> case preprocess xs of
         ("", _) -> return ()
         (s,  _) -> do
-            m <- parseS $ "it = " ++ init s
+            m <- parseS 0 $ "it = " ++ init s
             whenJust m $ \e -> do
                 let a = head . fromJust . M.lookup "it" $ binds e
                 REPLST env _ <- get
@@ -98,19 +98,19 @@ evalF xs = case last xs of
                 outputStrLn . evalShow .
                     Env (fst preludeM){depth = -2} $ Env env{depth = -1} a
 
-parseS :: String -> Shell REPLST (Maybe Envir)
-parseS s = do
+parseS :: Int -> String -> Shell REPLST (Maybe Envir)
+parseS i s = do
     REPLST _ ops <- get
     either
         (\(i, j) -> do
             outputStrLn $ "main:" ++ show i ++ ":" ++ show j ++ " parse error"
             return Nothing)
-        (return . Just) $ parse (snd preludeM ++ ops) s
+        (return . Just) $ parse (snd preludeM ++ ops) i s
 
 preludeM :: (Envir, [ParseOption])
 preludeM = traceShowId $
           let (s, ops) = preprocess prelude
-          in (mconcat $ rights $ map (parse ops) $ lines s, ops)
+          in (mconcat $ rights $ map (parse ops (-1)) $ lines s, ops)
 
 
 -- command :: String -> REPL ()

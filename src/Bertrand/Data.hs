@@ -102,7 +102,8 @@ instance Monoid Envir where
 
 instance Show Envir where
     show (Envir bs cs ds _ i) =
-        show i ++ show (M.toList bs) ++ show (M.toList cs) ++ show ds
+        show i ++ show (M.toList bs)
+        -- show i ++ show (M.toList bs) ++ show (M.toList cs) ++ show ds
 
 -- toExprs :: Envir -> [Expr]
 -- toExprs (Envir es _) = es

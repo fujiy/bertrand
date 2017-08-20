@@ -111,16 +111,16 @@ eof = do
 
 --------------------------------------------------------------------------------
 
-parse :: [ParseOption] -> String -> Either (Int, Int) Envir
-parse os cs = let (m, ParserState p _) = runParser (parser os) (purePS cs)
-              in  maybe (Left p) Right m
+parse :: [ParseOption] -> Int -> String -> Either (Int, Int) Envir
+parse os i cs = let (m, ParserState p _) = runParser (parser os i) (purePS cs)
+                in  maybe (Left p) Right m
 
 --------------------------------------------------------------------------------
 
 type OpeParser = Parser Expr -> Parser Expr
 
-parser :: [ParseOption] -> Parser Envir
-parser ops = emap (env 0) <$> statement <* eof
+parser :: [ParseOption] -> Int -> Parser Envir
+parser ops i = emap (env $ i + 1) <$> statement <* eof
     where
         env :: Int -> Expr -> Expr
         env i = \case

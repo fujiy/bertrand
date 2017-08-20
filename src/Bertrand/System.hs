@@ -45,19 +45,19 @@ prelude = unlines [
     "infixl 8 /",
     "infixl 10 .",
 
-    -- "(+) = #intadd",
-    -- "(-) = #intsub",
+    "(+) = #intadd",
+    "(-) = #intsub",
     -- "(*) = #intmul",
 
     -- "#if true a _  = a",
     -- "#if false _ b = b",
     --
 
-    "var true false",
-    "true.true",
-    "false.~false",
-
-    "~~true",
+    -- "var true false",
+    -- "true.true",
+    -- "false.~false",
+    --
+    -- "~~true",
     -- "cons and or",
     -- "true and true",
     -- "~(false and _)",
@@ -66,9 +66,12 @@ prelude = unlines [
     -- "_ or true",
     -- "~(false or false)",
 
-    "ternary _true  = true",
-    "ternary _false = false",
-    "ternary _     = undefined",
+    -- "ternary _true  = true",
+    -- "ternary _false = false",
+    -- "ternary _     = undefined",
+
+    "comma (x:[]) = x",
+    "comma (x:xs) = a ! a = x; a = comma xs",
 
     -- "_t and _t ! _t",
     -- "~ (_t and _f) ! _t; ~ _f",
@@ -78,6 +81,9 @@ prelude = unlines [
     -- "id x = x",
     -- "const x _ = x",
     -- "f $ x = f x",
+
+    -- "map f x = f x",
+    -- "inc = #intadd 1",
     --
     -- "head (x:_) = x",
     -- "tail (_:xs) = xs",
@@ -105,6 +111,8 @@ prelude = unlines [
     -- "drop 0 xs     = xs",
     -- "drop i (_:xs) = drop (i - 1) xs",
 
-    -- "f x = f (#intsub x 1)",
+    -- "ls = [1,2,3,4,5]",
+
+    -- "f x = a ! a = x",
 
     ""]
