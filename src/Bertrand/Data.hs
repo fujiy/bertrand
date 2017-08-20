@@ -46,7 +46,6 @@ data Expr = Id String
 
 data SystemType = Int Integer
                 | Func String (SystemType -> Maybe Expr)
-                | Pred String (SystemType -> Maybe Expr)
 
 instance Show Expr where
     show = \case
@@ -61,7 +60,6 @@ instance Show SystemType where
     show = \case
         Int i    -> show i
         Func s f -> '#':s
-        -- Pred
 
 instance Eq SystemType where
     Int x    == Int y     = x == y

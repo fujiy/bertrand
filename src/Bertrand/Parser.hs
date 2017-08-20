@@ -161,13 +161,13 @@ parser ops = emap (env 0) <$> statement <* eof
         declare = (\e -> mempty{decls = [([], e)]}) <$> expr
 
         opeparsers :: [OpeParser]
-        opeparsers = envir : lambda term : map opeparser opers
+        opeparsers = envir : lambda : map opeparser opers
 
         opers = operators ops
 
-        lambda :: Parser Expr -> OpeParser
-        lambda p q = (f <$> (sign "\\" *> some p) <* sign "->" <*> q)
-                     <|> q
+        lambda :: OpeParser
+        lambda p = (f <$> (sign "\\" *> some term) <* sign "->" <*> p)
+                     <|> p
             where
                 f es e = foldr1 Lambda $ es ++ [e]
 
@@ -189,13 +189,14 @@ parser ops = emap (env 0) <$> statement <* eof
                 <|> App (Id "~") <$> (sign "~" *> term)
                 <|> list
                 <|> ifelse
+                <|> caseof
                 <|> float
                 <|> number
                 <|> systemId
                 <|> Id <$> (identifier <|> wildcard <|> sign "()")
 
         signs :: [String]
-        signs = "!":";":"\\":"->":",":
+        signs = "!":";":"\\":"->":",":"if":"then":"else":"case":"of":
                 foldr (\(is, ils, irs, ifs) s -> is ++ ils ++ irs ++ ifs ++ s) [] opers
 
         operator :: Parser Expr
@@ -216,14 +217,24 @@ parser ops = emap (env 0) <$> statement <* eof
         wildcard = token ((:) <$> char '_' <*> many (letter <|> digit))
 
         list :: Parser Expr
-        list = (makeList .) . (++) <$> (sign "[" *> optionL expr) <*> many (sign "," *> expr) <* sign "]"
-            where
-                makeList :: [Expr] -> Expr
-                makeList = foldr (app2 (Id ":")) (Id "[]")
+        list = (makeList .) . (++) <$>
+               (sign "[" *> optionL expr) <*> many (sign "," *> expr) <* sign "]"
 
         ifelse :: Parser Expr
         ifelse = (\c a b -> App (App (App (Id "#if") c) a) b) <$>
                  (sign "if" *> expr) <*> (sign "then" *> expr) <*> (sign "else" *> expr)
+
+        caseof :: Parser Expr
+        caseof = (\e cs -> App (App (Id "comma") $ makeList cs) e) <$>
+                 (sign "case" *> expr) <* sign "of" <*>
+                 ((:) <$> clause <*> many (sign ";" *> clause))
+
+            where
+                clause :: Parser Expr
+                clause = Lambda . foldr1 App <$> some term <* sign "->" <*> expr
+
+        makeList :: [Expr] -> Expr
+        makeList = foldr (app2 (Id ":")) (Id "[]")
 
 operators :: [ParseOption] -> [([String], [String], [String], [String])]
 operators = M.elems . foldr f M.empty

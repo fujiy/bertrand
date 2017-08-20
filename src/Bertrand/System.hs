@@ -6,18 +6,28 @@ module Bertrand.System
 import Bertrand.Data
 
 systemIds :: [(String, SystemType)]
-systemIds = [
-    ("intadd", func2Int "intadd" (+)),
-    ("intsub", func2Int "intsub" (-)),
-    ("intmul", func2Int "intmul" (*)) ]
+systemIds = map (\(Func s f) -> (s, Func s f)) [
+    funcInt2Int "intadd" (+),
+    funcInt2Int "intsub" (-),
+    funcInt2Int "intmul" (*),
+    funcInt2 "intcompare" intcompare]
     where
-        func2Int :: String -> (Integer -> Integer -> Integer) -> SystemType
-        func2Int s f =
+        funcInt2Int :: String -> (Integer -> Integer -> Integer) -> SystemType
+        funcInt2Int s f = funcInt2 s (\x y -> System . Int $ f x y)
+
+        funcInt2 :: String -> (Integer -> Integer -> Expr) -> SystemType
+        funcInt2 s f =
             Func s $ \case
                 Int x -> Just $ System $ Func (s ++ "'") $ \case
-                    Int y -> Just $ System $ Int $ f x y
+                    Int y -> Just $ f x y
                     _ -> Nothing
                 _ -> Nothing
+
+        intcompare :: Integer -> Integer -> Expr
+        intcompare x y = case compare x y of
+            LT -> Id "less"
+            EQ -> Id "equal"
+            GT -> Id "greater"
 
 prelude :: String
 prelude = unlines [
