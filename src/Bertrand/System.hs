@@ -37,6 +37,10 @@ prelude = unlines [
     "infixr 4 and",
     "infixf 5 ==",
     "infixf 5 /=",
+    "infixf 5 <",
+    "infixf 5 =<",
+    "infixf 5 >",
+    "infixf 5 >=",
     "infixr 6 :",
     "infixr 6 ++",
     "infixl 7 +",
@@ -45,19 +49,19 @@ prelude = unlines [
     "infixl 8 /",
     "infixl 10 .",
 
-    "(+) = #intadd",
-    "(-) = #intsub",
+    -- "(+) = #intadd",
+    -- "(-) = #intsub",
     -- "(*) = #intmul",
 
     -- "#if true a _  = a",
     -- "#if false _ b = b",
     --
 
-    -- "var true false",
-    -- "true.true",
-    -- "false.~false",
-    --
-    -- "~~true",
+    "var true false",
+    "true.true",
+    "false.~false",
+    
+    "~~true",
     -- "cons and or",
     -- "true and true",
     -- "~(false and _)",
@@ -66,12 +70,14 @@ prelude = unlines [
     -- "_ or true",
     -- "~(false or false)",
 
-    -- "ternary _true  = true",
-    -- "ternary _false = false",
-    -- "ternary _     = undefined",
+    -- "f true = 0",
 
-    "comma (x:[]) = x",
-    "comma (x:xs) = a ! a = x; a = comma xs",
+    "ternary _true  = true",
+    "ternary _false = false",
+    "ternary _      = undefined",
+
+    -- "comma (x:[]) = x",
+    -- "comma (x:xs) = a ! a = x; a = comma xs",
 
     -- "_t and _t ! _t",
     -- "~ (_t and _f) ! _t; ~ _f",

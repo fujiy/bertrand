@@ -85,7 +85,7 @@ evalF xs = case last xs of
             whenJust m $ \e -> do
                 let a = head . fromJust . M.lookup "it" $ binds e
                 REPLST env _ <- get
-                outputStrLn . evalShow .
+                traceShow ('?', s, env) $ outputStrLn . evalShow .
                     Env (fst preludeM){depth = -2} $ Env env{depth = -1} a
     _   -> case preprocess xs of
         ("", _) -> return ()

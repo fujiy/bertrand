@@ -52,7 +52,7 @@ instance Show Expr where
         Id s       -> s
         App a b    -> "(" ++ show a ++ " " ++ show b ++ ")"
         Lambda a b -> "(\\" ++ show a ++ " -> " ++ show b ++ ")"
-        Env e a     -> show a
+        Env e a    -> show a
         -- Env e a    -> "(" ++ show a ++ " ! " ++ show e ++ ")"
         System s   -> show s
 
@@ -82,10 +82,10 @@ detachEnv = \case
     a       -> (id, a)
 
 --------------------------------------------------------------------------------
-data Envir = Envir { binds :: M.Map String [Expr], -- Binds
-                     cstrs :: M.Map String [Expr], -- Constraints
-                     decls :: [([String], Expr)],  -- Declarations
-                     vars  :: ([String], [String]),            -- Variables
+data Envir = Envir { binds :: M.Map String [Expr],  -- Binds
+                     cstrs :: M.Map String [Expr],  -- Constraints
+                     decls :: [([String], Expr)],   -- Declarations
+                     vars  :: ([String], [String]), -- Variables
                      depth :: Int }
 
 instance Eq Envir where
@@ -102,8 +102,8 @@ instance Monoid Envir where
 
 instance Show Envir where
     show (Envir bs cs ds _ i) =
-        show i ++ show (M.toList bs)
-        -- show i ++ show (M.toList bs) ++ show (M.toList cs) ++ show ds
+        -- show i ++ show (M.toList bs)
+        show i ++ show (M.toList bs) ++ show (M.toList cs) ++ show ds
 
 -- toExprs :: Envir -> [Expr]
 -- toExprs (Envir es _) = es

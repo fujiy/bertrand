@@ -121,17 +121,42 @@ diveEnv_ :: (Expr -> a) -> Expr -> a
 diveEnv_ = diveEnv (const id)
 
 tunnelEnv :: ((Expr -> Expr) -> a -> a) -> Evaluator (Expr, Expr) a -> Evaluator (Expr, Expr) a
-tunnelEnv f g (a, b) = case a of
+-- tunnelEnv f g (a, b) = do
+--   envs <- envirs
+--   i <- currentDepth
+--   -- traceShow ('t', i, a, b, envs) $
+--   case a of
+--     Env env a' -> do
+--         i <- currentDepth
+--         f (envir env) <$>
+--             subEnvir env (tunnelEnv f g (a', shield i b))
+--     _          -> g (a, b)
+
+tunnelEnv f g (a, b) = do
+  envs <- envirs
+  b' <- shieldBy a b
+  diveEnvM f
+    (\a' -> do
+        envs' <- envirs
+        -- traceShow ('t', a, b, b', envs, envs') 
+        g (a', b')) a
+
+
+shieldBy :: Expr -> Evaluator Expr Expr
+shieldBy a b = case a of
     Env env a' -> do
         i <- currentDepth
-        f (envir env) <$>
-            subEnvir env (tunnelEnv f g (a', shield i b))
-    _          -> g (a, b)
+        if depth env > i
+        then shield i <$> shieldBy a' b
+        else foldl (flip Env) <$> shieldBy a' b <*>
+                 (takeWhile (\e -> depth e >= depth env) <$> envirs)
+    _ -> return b
+
 
 envir :: Envir -> Expr -> Expr
 envir env = \case
-    Env env' a | depth env >= depth env'
-             -> Env env' a
+    -- Env env' a | depth env >= depth env'
+    --          -> Env env' a
     System s -> System s
     a        -> Env env a
 
@@ -221,20 +246,22 @@ eval e =
                 defaultL _ as = as
 
         apply :: Evaluator (Expr, Expr) (Maybe Expr)
-        apply (a, b) = (\e -> traceShow ('a', a, b, e) e) <$> do
+        apply (a, b) = do
             i <- currentDepth
             envs <- envirs
             -- envs <- takeWhile (\env ->
             --             depth env >= depthOf i a) <$> envirs
-            let b' = traceShow ('i', a, b, i) $ foldl (flip Env) b envs
+            let b' = foldl (flip Env) b envs
             -- (\e' -> trace (show (a, b) ++ "\n=> " ++ show e' ++ "\n  " ++ show es) e') <$>
             tunnelEnv fmap (
                 \(Lambda a b, e) -> do
                     i <- currentDepth
+                    envs' <- envirs
                     m <- fmap fromList <$> match (a, e)
-                    traceShow ('t', i, m) <$> return $ (\x -> Env
+                    -- traceShow ('a', i, a, b', e, m, envs, envs')
+                    return $ (\x -> Env
                         mempty{binds = x, depth = i + 1} b) <$> m)
-                (a, b')
+                (a, b)
 
         depthOf :: Int -> Expr -> Int
         depthOf i e = fromJust $ f e <|> Just i
@@ -410,11 +437,12 @@ isVar s = elem s . concatMap (fst . vars) <$> envirs
 
 
 infer :: Evaluator Expr Bool
-infer e = (\t -> traceShow ('i', e, t) t) <$> ((do
+infer = diveEnvM_ (\e -> ((do
     ds <- concatMap (\env -> map (mapSnd $ shieldWith env) $
               decls env) <$> envirs
-    -- ds <- envirsWith (map snd . decls)
+    envs <- envirs
     -- infer (App (App (Id "=>") (Id "true")) e)
+    -- traceShow ('i', e, ds, envs)
     asum <$> mapM (\(ss, d) ->
         (<|>) <$> matchR ss (d, e) <*>
             (case toList d of
@@ -424,7 +452,7 @@ infer e = (\t -> traceShow ('i', e, t) t) <$> ((do
                 _ -> return $ pure False) ) ds
     ) >>= \case
     Pure a   -> return a
-    Thunk fs -> go fs)
+    Thunk fs -> go fs))
 
     where
         go :: Evaluator (ThunkList Bool) Bool
@@ -441,7 +469,9 @@ infer e = (\t -> traceShow ('i', e, t) t) <$> ((do
 
 matchR :: [String] -> Evaluator (Expr, Expr) (Thunk Bool)
 matchR ss = tunnelEnv (const id)
-    (\(a, b) -> traceShow ('m', a, b) $ case a of
+    (\(a, b) ->
+        -- traceShow ('m', a, b) $
+        case a of
         Id s -> do
             let wc = head s == '_'
                 s' = if wc then tail s else s
