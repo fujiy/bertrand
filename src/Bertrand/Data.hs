@@ -2,7 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Bertrand.Data(
-    Expr(..), toList, detach, detachEnv,
+    Expr(..), toList, detach, detachEnv, isName,
     SystemType(..),
     Envir(..), emap,
     Boolean(..),
@@ -80,6 +80,11 @@ detachEnv = \case
     Env t a -> let (f, a') = detachEnv a
                in  (Env t . f, a')
     a       -> (id, a)
+
+isName :: String -> Expr -> Bool
+isName s e = case snd $ detachEnv e of
+    Id s' -> s' == s
+    _     -> False
 
 --------------------------------------------------------------------------------
 data Envir = Envir { binds :: M.Map String [Expr],  -- Binds

@@ -31,7 +31,8 @@ systemIds = map (\(Func s f) -> (s, Func s f)) [
 
 prelude :: String
 prelude = unlines [
-    "infixr 0 $",
+    "infixr 0 =",
+    "infixr 1 $",
     "infixf 2 =>",
     "infixr 3 or",
     "infixr 4 and",
@@ -60,7 +61,7 @@ prelude = unlines [
     "var true false",
     "true.true",
     "false.~false",
-    
+
     "~~true",
     -- "cons and or",
     -- "true and true",

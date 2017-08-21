@@ -136,7 +136,7 @@ parser ops i = emap (env $ i + 1) <$> statement <* eof
         statement :: Parser Envir
         statement = variable
                 <|> constraint
-                <|> bind
+                -- <|> bind
                 <|> declare
 
         variable :: Parser Envir
@@ -150,15 +150,24 @@ parser ops i = emap (env $ i + 1) <$> statement <* eof
                                       decls = [(ss, e)]}) <$>
                          some identifier' <* sign "." <*> expr
 
-        bind :: Parser Envir
-        bind = (,) <$> expr <*> (sign "=" *> expr) >>= f
-            where
-                f (a, e) = let x:es = toList a in case detach x of
-                    Id s -> return mempty{binds = M.singleton s [foldr Lambda e es]}
-                    _    -> mzero
+        -- bind :: Parser Envir
+        -- bind = (,) <$> expr <*> (sign "=" *> expr) >>= f
+        --     where
+        --         f (a, e) = let x:es = toList a in case detach x of
+        --             Id s -> return mempty{binds = M.singleton s [foldr Lambda e es]}
+        --             _    -> mzero
 
         declare :: Parser Envir
-        declare = (\e -> mempty{decls = [([], e)]}) <$> expr
+        declare = expr >>= f
+            where
+                f e = case toList e of
+                    [a, b, c] | isName "=" a ->
+                        let x:es = toList b
+                        in case detach x of
+                            Id s -> return mempty{binds =
+                                        M.singleton s [foldr Lambda c es]}
+                            _    -> mzero
+                    _ -> return mempty{decls = [([], e)]}
 
         opeparsers :: [OpeParser]
         opeparsers = envir : lambda : map opeparser opers

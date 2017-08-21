@@ -138,7 +138,7 @@ tunnelEnv f g (a, b) = do
   diveEnvM f
     (\a' -> do
         envs' <- envirs
-        -- traceShow ('t', a, b, b', envs, envs') 
+        -- traceShow ('t', a, b, b', envs, envs')
         g (a', b')) a
 
 
@@ -437,19 +437,26 @@ isVar s = elem s . concatMap (fst . vars) <$> envirs
 
 
 infer :: Evaluator Expr Bool
-infer = diveEnvM_ (\e -> ((do
-    ds <- concatMap (\env -> map (mapSnd $ shieldWith env) $
-              decls env) <$> envirs
-    envs <- envirs
-    -- infer (App (App (Id "=>") (Id "true")) e)
-    -- traceShow ('i', e, ds, envs)
-    asum <$> mapM (\(ss, d) ->
-        (<|>) <$> matchR ss (d, e) <*>
-            (case toList d of
-                b:_ | not (isName "=>" b) -> return $ pure False
-                [_, b, c] -> (\x y -> (&&) <$> x <*> y) <$>
-                    matchR [] (c, e) <*> matchR [] (Id "true", b)
-                _ -> return $ pure False) ) ds
+infer = diveEnvM_ (\e -> ((case toList e of
+    [a, b, c] | isName "=" a -> pure . isJust <$> match (b, c)
+    [a, b] | isName "~" a && (case toList b of
+        [a, b, c] | isName "=" a -> True
+        _                        -> False)
+        -> let [_, d, e] = toList b
+           in  pure . isNothing <$> match (d, e)
+    _ -> do
+        ds <- concatMap (\env -> map (mapSnd $ shieldWith env) $
+                  decls env) <$> envirs
+        envs <- envirs
+        -- infer (App (App (Id "=>") (Id "true")) e)
+        -- traceShow ('i', e, ds, envs)
+        asum <$> mapM (\(ss, d) ->
+            (<|>) <$> matchR ss (d, e) <*>
+                (case toList d of
+                    b:_ | not (isName "=>" b) -> return $ pure False
+                    [_, b, c] -> (\x y -> (&&) <$> x <*> y) <$>
+                        matchR [] (c, e) <*> matchR [] (Id "true", b)
+                    _ -> return $ pure False) ) ds
     ) >>= \case
     Pure a   -> return a
     Thunk fs -> go fs))
@@ -461,11 +468,6 @@ infer = diveEnvM_ (\e -> ((do
             Pure True  -> return True
             Pure False -> go fs
             Thunk fs'  -> go $ fs ++ fs'
-
-        isName :: String -> Expr -> Bool
-        isName s = diveEnv_ (\case
-            Id s' -> s' == s
-            _     -> False )
 
 matchR :: [String] -> Evaluator (Expr, Expr) (Thunk Bool)
 matchR ss = tunnelEnv (const id)
