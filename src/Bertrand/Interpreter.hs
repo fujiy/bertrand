@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 -- {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Bertrand.Interpreter
     (evalShow
@@ -22,7 +23,7 @@ import Data.Either
 import Data.Foldable (asum)
 import Data.List hiding (lookup)
 -- import Data.List.Extra
-import Data.Map (Map, lookup, fromListWith)
+import Data.Map (Map, lookup, fromListWith, singleton)
 import Data.Maybe
 -- import Data.Monoid
 import Data.Tree
@@ -80,6 +81,11 @@ instance Monad Thunk where
     Pure a   >>= f = f a
     Thunk as >>= f = Thunk $ fmap (>>= f) <$> as
 
+
+type Matcher = StateT Match Interpreter
+
+type Match = Map String [Expr]
+
 --------------------------------------------------------------------------------
 -- Interpreter --
 
@@ -90,13 +96,13 @@ evaluate f a = runReader (evalStateT (f a) empty) empty
 -- evalWith :: EnvirS -> Evaluator a b -> a -> b
 -- evalWith envs f a = runReader (f a) envs
 
-subEnvir :: Envir -> Interpreter a -> Interpreter a
+subEnvir :: MonadReader EnvirS m => Envir -> m a -> m a
 subEnvir env = local (\envs -> env : dropWhile (>= env) envs)
 
-envirs :: Interpreter [Envir]
+envirs :: MonadReader EnvirS m => m [Envir]
 envirs = ask
 
-currentDepth :: Interpreter Int
+currentDepth :: MonadReader EnvirS m => m Int
 currentDepth = depth . head <$> ask
 
 -- envirsWith :: (Envir -> [Expr]) -> Interpreter [Expr]
@@ -104,7 +110,8 @@ currentDepth = depth . head <$> ask
 --                    map (shield $ depth env + 1) $ f env)
 --                <$> envirs
 
-diveEnvM :: ((Expr -> Expr) -> a -> a) -> Evaluator Expr a -> Evaluator Expr a
+diveEnvM :: MonadReader EnvirS m =>
+                ((Expr -> Expr) -> a -> a) -> (Expr -> m a) -> (Expr -> m a)
 diveEnvM f g = \case
     Env env a -> f (envir env) <$> subEnvir env (diveEnvM f g a)
     e         -> g e
@@ -114,13 +121,14 @@ diveEnv f g = \case
     Env env a -> f (envir env) $ diveEnv f g a
     e         -> g e
 
-diveEnvM_ :: Evaluator Expr a -> Evaluator Expr a
+diveEnvM_ :: MonadReader EnvirS m => (Expr -> m a) -> (Expr -> m a)
 diveEnvM_ = diveEnvM (const id)
 
 diveEnv_ :: (Expr -> a) -> Expr -> a
 diveEnv_ = diveEnv (const id)
 
-tunnelEnv :: ((Expr -> Expr) -> a -> a) -> Evaluator (Expr, Expr) a -> Evaluator (Expr, Expr) a
+tunnelEnv :: MonadReader EnvirS m =>
+                ((Expr -> Expr) -> a -> a) -> ((Expr, Expr) -> m a) -> ((Expr, Expr) -> m a)
 -- tunnelEnv f g (a, b) = do
 --   envs <- envirs
 --   i <- currentDepth
@@ -131,18 +139,18 @@ tunnelEnv :: ((Expr -> Expr) -> a -> a) -> Evaluator (Expr, Expr) a -> Evaluator
 --         f (envir env) <$>
 --             subEnvir env (tunnelEnv f g (a', shield i b))
 --     _          -> g (a, b)
-
 tunnelEnv f g (a, b) = do
   envs <- envirs
   b' <- shieldBy a b
   diveEnvM f
     (\a' -> do
         envs' <- envirs
-        -- traceShow ('t', a, b, b', envs, envs')
         g (a', b')) a
 
+tunnelEnv_ ::  MonadReader EnvirS m => ((Expr, Expr) -> m a) -> ((Expr, Expr) -> m a)
+tunnelEnv_ = tunnelEnv $ const id
 
-shieldBy :: Expr -> Evaluator Expr Expr
+shieldBy :: MonadReader EnvirS m => Expr -> Expr -> m Expr
 shieldBy a b = case a of
     Env env a' -> do
         i <- currentDepth
@@ -165,6 +173,19 @@ shield i = envir mempty{depth = i + 1}
 
 shieldWith :: Envir -> Expr -> Expr
 shieldWith env = shield $ depth env
+
+
+matches :: Matcher Match
+matches = get
+
+success :: Match -> Matcher Bool
+success m = modify (mappend m) >> return True
+
+success_ :: Matcher Bool
+success_ = return True
+
+mfail :: Matcher Bool
+mfail = return False
 
 --------------------------------------------------------------------------------
 -- Show function --
@@ -257,7 +278,7 @@ eval e =
                 \(Lambda a b, e) -> do
                     i <- currentDepth
                     envs' <- envirs
-                    m <- fmap fromList <$> match (a, e)
+                    m <- match (a, e)
                     -- traceShow ('a', i, a, b', e, m, envs, envs')
                     return $ (\x -> Env
                         mempty{binds = x, depth = i + 1} b) <$> m)
@@ -307,45 +328,51 @@ eval e =
         fromList :: [(String, Expr)] -> Map String [Expr]
         fromList = fromListWith (++) . map (mapSnd pure)
 
-evalAfter :: Monoid a => Expr -> Evaluator Expr a -> Interpreter a
+-- evalAfter :: (Monad m, Monoid a) => Expr -> (Expr -> m a) -> m a
 evalAfter a f = eval a >>= mconcatMapM f
+
+evalAfterMatch :: Expr -> (Expr -> Matcher Bool) -> Matcher Bool
+evalAfterMatch a f = lift (eval a) >>= (\as -> or <$> mapM f as)
 
 --------------------------------------------------------------------------------
 -- Pattern matching --
 
-match :: Evaluator (Expr, Expr) (Maybe [(String, Expr)])
-match (a, b) = evalAfter a $
-    tunnelEnv (const id) (\(a, b) -> case a of
-        Id s -> do
-            let wc = head s == '_'
-                s' = if wc then tail s else s
-            var <- isVar s'
-            if null s' then return $ Just []
-            else if var then do
-                cs <- concatMap (\env -> map (shieldWith env) .
-                              concat . lookup s' $ cstrs env) <$> envirs
-                let ds = map ($ b) . catMaybes $ map (search s') cs
-                bool Nothing (Just $ if wc then [] else [(s', b)])
-                    <$> allM infer ds
-            else evalAfter b $
-                return . diveEnv_ (\case
-                    Id s'' | s' == s'' -> Just []
-                    _                  -> Nothing )
+match :: Evaluator (Expr, Expr) (Maybe Match)
+-- match (a, b) = evalAfter a $
+--     tunnelEnv (const id) (\(a, b) -> case a of
+--         Id s -> do
+--             let wc = head s == '_'
+--                 s' = if wc then tail s else s
+--             var <- isVar s'
+--             if null s' then return $ Just mempty
+--             else if var then do
+--                 cs <- concatMap (\env -> map (shieldWith env) .
+--                               concat . lookup s' $ cstrs env) <$> envirs
+--                 let ds = map ($ b) . catMaybes $ map (search s') cs
+--                 bool Nothing (Just $ if wc then mempty else singleton s' [b])
+--                     <$> allM infer ds
+--             else evalAfter b $
+--                 return . diveEnv_ (\case
+--                     Id s'' | s' == s'' -> Just mempty
+--                     _                  -> Nothing )
+--
+--         System s -> evalAfter b $
+--             return . diveEnv_ (\case
+--                 System s' | s == s' -> Just mempty
+--                 _                   -> Nothing )
+--
+--         App _ _ -> evalAfter b $ \b' ->
+--             let as = toList a
+--                 bs = toList b'
+--             in if length as == length bs
+--                 then fmap mconcat . sequence <$>
+--                      mapM match (zip as bs)
+--                 else return Nothing
+--
+--         _ -> return Nothing ) . (, b)
 
-        System s -> evalAfter b $
-            return . diveEnv_ (\case
-                System s' | s == s' -> Just []
-                _                   -> Nothing )
-
-        App _ _ -> evalAfter b $ \b' ->
-            let as = toList a
-                bs = toList b'
-            in if length as == length bs
-                then fmap concat . sequence <$>
-                    mapM match (zip as bs)
-                else return Nothing
-
-        _ -> return Nothing ) . (, b)
+match t = (\(t, m') -> if t then Just m' else Nothing)
+          <$> runStateT (matcher t) mempty
     where
         search :: String -> Expr -> Maybe (Expr -> Expr)
         search s = diveEnv (\f -> fmap (f .)) $ \case
@@ -357,7 +384,42 @@ match (a, b) = evalAfter a $
                 (Just fa, Just fb) -> Just $ \e -> App (fa e) (fb e)
             _ -> Nothing
 
-isVar :: Evaluator String Bool
+        matcher :: (Expr, Expr) -> Matcher Bool
+        matcher (a, b) = evalAfterMatch a $
+            tunnelEnv_ (\(a, b) -> case a of
+                Id s -> do
+                    let wc = head s == '_'
+                        s' = if wc then tail s else s
+                    var <- isVar s'
+                    if null s' then success_
+                    else if var then do
+                        cs <- concatMap (\env -> map (shieldWith env) .
+                                      concat . lookup s' $ cstrs env) <$> envirs
+                        es <- lookup s' <$> matches
+                        let ds = map ($ b) . catMaybes $ map (search s') cs
+                        t <- lift $ allM infer ds
+                        if t then if wc then success_
+                                        else success $ singleton s' [b]
+                             else mfail
+                    else evalAfterMatch b $ diveEnv_ $ \case
+                        Id s'' | s' == s'' -> success_
+                        _                  -> mfail
+
+                App _ _ -> evalAfterMatch b $ \b' ->
+                    let as = toList a
+                        bs = toList b'
+                    in if length as == length bs
+                        then and <$> mapM matcher (zip as bs)
+                        else mfail
+
+                System s ->
+                    evalAfterMatch b $ diveEnvM_ $ \case
+                        System s' | s == s' -> success_
+                        _                   -> mfail
+
+                _ -> mfail ) . (, b)
+
+isVar :: MonadReader EnvirS m => String -> m Bool
 isVar s | length s < 4 && all isLower s
         = notElem s . concatMap (snd . vars) <$> envirs
 isVar s = elem s . concatMap (fst . vars) <$> envirs
