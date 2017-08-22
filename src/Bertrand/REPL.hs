@@ -90,7 +90,7 @@ evalF xs = case last xs of
     _   -> case preprocess xs of
         ("", _) -> return ()
         (s,  _) -> do
-            m <- parseS 0 $ "it = " ++ init s
+            m <- parseS 0 $ "it = (" ++ init s ++ ")"
             whenJust m $ \e -> do
                 let a = head . fromJust . M.lookup "it" $ binds e
                 REPLST env _ <- get

@@ -38,10 +38,10 @@ prelude = unlines [
     "infixr 4 and",
     "infixf 5 ==",
     "infixf 5 /=",
+    "infixf 5 <=",
     "infixf 5 <",
-    "infixf 5 =<",
-    "infixf 5 >",
     "infixf 5 >=",
+    "infixf 5 >",
     "infixr 6 :",
     "infixr 6 ++",
     "infixl 7 +",
@@ -49,10 +49,6 @@ prelude = unlines [
     "infixl 8 *",
     "infixl 8 /",
     "infixl 10 .",
-
-    -- "(+) = #intadd",
-    -- "(-) = #intsub",
-    -- "(*) = #intmul",
 
     -- "#if true a _  = a",
     -- "#if false _ b = b",
@@ -63,19 +59,26 @@ prelude = unlines [
     "false.~false",
 
     "~~true",
-    -- "cons and or",
-    -- "true and true",
-    -- "~(false and _)",
-    -- "~(_ and false)",
-    -- "true or _",
-    -- "_ or true",
-    -- "~(false or false)",
+
+
+    "cons and or",
+    "true and true",
+    "~(false and _)",
+    "~(_ and false)",
+    "true or _",
+    "_ or true",
+    "~(false or false)",
 
     -- "f true = 0",
 
     "ternary _true  = true",
     "ternary _false = false",
     "ternary _      = undefined",
+
+    "a == b = (a = b) and (b = a)",
+    "a /= b = ~ (a == b)",
+
+    -- "x > y = #intcompare x y = greater",
 
     -- "comma (x:[]) = x",
     -- "comma (x:xs) = a ! a = x; a = comma xs",
@@ -91,7 +94,19 @@ prelude = unlines [
 
     -- "map f x = f x",
     -- "inc = #intadd 1",
-    --
+
+    -- -- Arithmetic
+
+    "(+) = #intadd",
+    "(-) = #intsub",
+    "(*) = #intmul",
+
+    "x > y  = #intcompare x y = greater",
+    "x >= y = (#intcompare x y = greater) or (#intcompare x y = equal)",
+    "x < y  = #intcompare x y = less",
+    "x <= y = (#intcompare x y = less) or (#intcompare x y = equal)",
+
+    -- -- List
     -- "head (x:_) = x",
     -- "tail (_:xs) = xs",
     -- "last (x:[]) = x",

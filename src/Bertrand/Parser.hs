@@ -195,14 +195,14 @@ parser ops i = emap (env $ i + 1) <$> statement <* eof
 
         term :: Parser Expr
         term = sign "(" *> expr <* sign ")"
-                <|> App (Id "~") <$> (sign "~" *> term)
-                <|> list
-                <|> ifelse
-                <|> caseof
-                <|> float
-                <|> number
-                <|> systemId
-                <|> Id <$> (identifier <|> wildcard <|> sign "()")
+           <|> App (Id "~") <$> (sign "~" *> term)
+           <|> list
+           <|> ifelse
+           <|> caseof
+           <|> float
+           <|> number
+           <|> systemId
+           <|> Id <$> (identifier <|> wildcard <|> sign "()")
 
         signs :: [String]
         signs = "!":";":"\\":"->":",":"if":"then":"else":"case":"of":

@@ -63,6 +63,10 @@ data Thunk a = Pure a
 
 type ThunkList a = [Interpreter (Thunk a)]
 
+instance Monoid (Thunk a) where
+    mempty = empty
+    mappend = (<|>)
+
 instance Applicative Thunk where
     pure = Pure
     Pure f   <*> Pure b   = Pure $ f b
@@ -331,6 +335,8 @@ eval e =
 -- evalAfter :: (Monad m, Monoid a) => Expr -> (Expr -> m a) -> m a
 evalAfter a f = eval a >>= mconcatMapM f
 
+evalAfterBool a f = eval a >>= (\as -> or <$> mapM f as)
+
 evalAfterMatch :: Expr -> (Expr -> Matcher Bool) -> Matcher Bool
 evalAfterMatch a f = lift (eval a) >>= (\as -> or <$> mapM f as)
 
@@ -424,106 +430,38 @@ isVar s | length s < 4 && all isLower s
         = notElem s . concatMap (snd . vars) <$> envirs
 isVar s = elem s . concatMap (fst . vars) <$> envirs
 
--- match (a, b) = do
---     (fa, ea) <- detachEnv <$> eval a
---     case ea of
---         Var "_" -> return $ Just []
---         Var s -> do
---             i <- envirsNum
---             return $ if envirsNumOf i (fa ea) >= i
---                      then Just [Bind s b]
---                      else Just []
---         Param _ s -> do
---             i <- envirsNum
---             return $ if envirsNumOf i (fa ea) >= i
---                      then Just [Bind s b]
---                      else Just []
---         Cons xs as -> do
---             (fb, eb) <- detachEnv <$> eval b
---             case eb of
---                 Cons ys bs | xs == ys &&
---                               length as == length bs -> do
---                     ms <- mapM match $ zip (map fa as) (map fb bs)
---                     return $ if all isJust ms
---                              then Just $ concat $ catMaybes ms
---                              else Nothing
---                 Comma bs -> undefined
---                 _ -> return Nothing
---         Comma as -> do
---             ms <- mapM (\a' -> match (fa a', b)) as
---             return $ if any isJust ms
---                      then Just $ concat $ catMaybes ms
---                      else Nothing
---         App _ _ -> return Nothing
---         _       -> return Nothing
---
---         where
---             envirsNumOf :: Int -> Expr -> Int
---             envirsNumOf i = \case
---                 Env (j, _) e -> envirsNumOf (min i j) e
---                 _            -> i
-
--- matchR :: Evaluator (Expr, Expr) Bool
--- matchR (a, b) = do
---     (fa, ea) <- detachEnv <$> eval a
---     (fb, eb) <- detachEnv <$> eval b
---     case (ea, eb) of
---         (Var "_", _) -> return False
---         (Var xs, Var ys) | xs == ys
---             -> return True
---         (Param xs, _)
---             -> do
---             es <- concatMap toExprs <$> envirs
---             ds <- concatMapM (`search` fa ea) es
---             and <$> mapM reason (ds <*> [fb eb])
---         (Cons xs as, Cons ys bs) | xs == ys &&
---                                    length as == length bs
---             -> and <$> mapM matchR (zip (map fa as) (map fb bs))
---         (App ax ay, App bx by)
---             -> (&&) <$> matchR (fa ax, fb bx) <*> matchR (fa ay, fb by)
---         _   -> return False
-
--- step :: (a -> Lazy b) -> Lazy a -> Lazy b
--- step f l = l >>= ()
-
 --------------------------------------------------------------------------------
 -- Reasoner --
 
--- search e = do
---     ds <- concatMap (\env ->
---         map (envir mempty{depth = depth env}) $ decls env) <$> envirs
---     catMaybes <$> mapM searchExpr ds
---     where
---         searchExpr :: Evaluator Expr (Maybe (Expr -> Expr))
---         searchExpr e = undefined
-
 
 infer :: Evaluator Expr Bool
-infer = diveEnvM_ (\e -> ((case toList e of
+infer e = evalAfterBool e $ diveEnvM_ (\e -> ((case toList e of
     [a, b, c] | isName "=" a -> pure . isJust <$> match (b, c)
-    [a, b] | isName "~" a && (case toList b of
-        [a, b, c] | isName "=" a -> True
-        _                        -> False)
-        -> let [_, d, e] = toList b
-           in  pure . isNothing <$> match (d, e)
-    _ -> do
-        ds <- concatMap (\env -> map (mapSnd $ shieldWith env) $
-                  decls env) <$> envirs
-        envs <- envirs
-        -- infer (App (App (Id "=>") (Id "true")) e)
-        -- traceShow ('i', e, ds, envs)
-        asum <$> mapM (\(ss, d) ->
-            (<|>) <$> matchR ss (d, e) <*>
-                (case toList d of
-                    b:_ | not (isName "=>" b) -> return $ pure False
-                    [_, b, c] -> (\x y -> (&&) <$> x <*> y) <$>
-                        matchR [] (c, e) <*> matchR [] (Id "true", b)
-                    _ -> return $ pure False) ) ds
+    [a, b] | isName "~" a ->
+        evalAfter b (\b' -> case toList b' of
+            [c, d, e] | isName "=" c -> pure . isNothing <$> match (d, e)
+            _                        -> infer' e)
+    _ -> infer' e
     ) >>= \case
     Pure a   -> return a
     Thunk fs -> go fs))
 
     where
+        infer' :: Evaluator Expr (Thunk Bool)
+        infer' e = do
+            ds <- concatMap (\env -> map (mapSnd $ shieldWith env) $
+                      decls env) <$> envirs
+            envs <- envirs
+            -- infer (App (App (Id "=>") (Id "true")) e)
+            -- traceShow ('i', e, ds, envs)
+            asum <$> mapM (\(ss, d) ->
+                (<|>) <$> matchR ss (d, e) <*>
+                    (case toList d of
+                        b:_ | not (isName "=>" b) -> return $ pure False
+                        [_, b, c] -> (\x y -> (&&) <$> x <*> y) <$>
+                            matchR ss (c, e) <*> matchR [] (Id "true", b)
+                        _ -> return $ pure False) ) ds
+
         go :: Evaluator (ThunkList Bool) Bool
         go [] = return False
         go (f:fs) = f >>= \case
@@ -532,7 +470,7 @@ infer = diveEnvM_ (\e -> ((case toList e of
             Thunk fs'  -> go $ fs ++ fs'
 
 matchR :: [String] -> Evaluator (Expr, Expr) (Thunk Bool)
-matchR ss = tunnelEnv (const id)
+matchR ss (a, b) = evalAfter a $ tunnelEnv_
     (\(a, b) ->
         -- traceShow ('m', a, b) $
         case a of
@@ -543,16 +481,16 @@ matchR ss = tunnelEnv (const id)
             if null s' then return $ pure True
             else if var && s' `notElem` ss
                 then pure . isJust <$> match (a, b)
-            else return . pure $ diveEnv_ (\case
+            else evalAfter b (return . pure . diveEnv_ (\case
                 Id s'' | s' == s'' -> True
-                _                  -> False ) b
-        App _ _ -> let
+                _                  -> False ))
+        App _ _ -> evalAfter b $ \b' -> let
             as = toList a
-            bs = toList b
+            bs = toList b'
             in if length as == length bs
                 then andT $ mapM (matchR ss) (zip as bs)
                 else return $ pure False
-        _ -> return $ pure False)
+        _ -> return $ pure False) . (, b)
 
         where
             andT :: Interpreter [Thunk Bool] -> Interpreter (Thunk Bool)
