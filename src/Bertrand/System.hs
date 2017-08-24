@@ -10,8 +10,15 @@ systemIds = map (\(Func s f) -> (s, Func s f)) [
     funcInt2Int "intadd" (+),
     funcInt2Int "intsub" (-),
     funcInt2Int "intmul" (*),
+    funcInt1 "intminus" (\x -> System $ Int (-x)),
     funcInt2 "intcompare" intcompare]
     where
+        funcInt1 :: String -> (Integer -> Expr) -> SystemType
+        funcInt1 s f =
+            Func s $ \case
+                Int x -> Just $ f x
+                _     -> Nothing
+
         funcInt2Int :: String -> (Integer -> Integer -> Integer) -> SystemType
         funcInt2Int s f = funcInt2 s (\x y -> System . Int $ f x y)
 
@@ -50,16 +57,11 @@ prelude = unlines [
     "infixl 8 /",
     "infixl 10 .",
 
-    -- "#if true a _  = a",
-    -- "#if false _ b = b",
-    --
-
-    "var true false",
+    "var true false undefined",
     "true.true",
     "false.~false",
 
     "~~true",
-
 
     "cons and or",
     "true and true",
@@ -69,8 +71,6 @@ prelude = unlines [
     "_ or true",
     "~(false or false)",
 
-    -- "f true = 0",
-
     "ternary _true  = true",
     "ternary _false = false",
     "ternary _      = undefined",
@@ -78,22 +78,16 @@ prelude = unlines [
     "a == b = (a = b) and (b = a)",
     "a /= b = ~ (a == b)",
 
-    -- "x > y = #intcompare x y = greater",
+    "x > y = #intcompare x y = greater",
 
-    -- "comma (x:[]) = x",
-    -- "comma (x:xs) = a ! a = x; a = comma xs",
+    "comma (x:[]) = x",
+    "comma (x:xs) = a ! a = x; a = comma xs",
 
-    -- "_t and _t ! _t",
-    -- "~ (_t and _f) ! _t; ~ _f",
-    -- "~ (_f and _t) ! _t; ~ _f",
-    -- "~ (_f and _f) ! _t; ~ _f",
+    -- Basic function
 
-    -- "id x = x",
-    -- "const x _ = x",
-    -- "f $ x = f x",
-
-    -- "map f x = f x",
-    -- "inc = #intadd 1",
+    "id x = x",
+    "const x _ = x",
+    "f $ x = f x",
 
     -- -- Arithmetic
 
@@ -101,40 +95,38 @@ prelude = unlines [
     "(-) = #intsub",
     "(*) = #intmul",
 
+    "(-) = #intminus",
+
     "x > y  = #intcompare x y = greater",
     "x >= y = (#intcompare x y = greater) or (#intcompare x y = equal)",
     "x < y  = #intcompare x y = less",
     "x <= y = (#intcompare x y = less) or (#intcompare x y = equal)",
 
-    -- -- List
-    -- "head (x:_) = x",
-    -- "tail (_:xs) = xs",
-    -- "last (x:[]) = x",
-    -- "last (_:xs) = last xs",
-    -- "init (x:_:[]) = [x]",
-    -- "init (x:xs)   = x : init xs",
-    -- "null [] = true",
-    -- "null xs = false",
-    -- "length []     = 0",
-    -- "length (_:xs) = length xs + 1",
-    -- "[]     ++ ys = ys",
-    -- "(x:xs) ++ ys = x:(xs ++ ys)",
-    -- "map _ []     = []",
-    -- "map f (x:xs) = f x : map f xs",
-    -- "foldl _ a []     = a",
-    -- "foldl f a (x:xs) = foldl f (f a x) xs",
-    -- "foldr f z []     = z",
-    -- "foldr f z (x:xs) = f x (foldr f z xs)",
-    -- "concat = foldr (++) []",
-    -- "take _ []     = []",
-    -- "take 0 _      = []",
-    -- "take i (x:xs) = x : take (i - 1) xs",
-    -- "drop _ []     = []",
-    -- "drop 0 xs     = xs",
-    -- "drop i (_:xs) = drop (i - 1) xs",
-
-    -- "ls = [1,2,3,4,5]",
-
-    -- "f x = a ! a = x",
+    -- List
+    "head (x:_) = x",
+    "tail (_:xs) = xs",
+    "last (x:[]) = x",
+    "last (_:xs) = last xs",
+    "init (x:_:[]) = [x]",
+    "init (x:xs)   = x : init xs",
+    "null [] = true",
+    "null xs = false",
+    "length []     = 0",
+    "length (_:xs) = length xs + 1",
+    "[]     ++ ys = ys",
+    "(x:xs) ++ ys = x:(xs ++ ys)",
+    "map _ []     = []",
+    "map f (x:xs) = f x : map f xs",
+    "foldl _ a []     = a",
+    "foldl f a (x:xs) = foldl f (f a x) xs",
+    "foldr f z []     = z",
+    "foldr f z (x:xs) = f x (foldr f z xs)",
+    "concat = foldr (++) []",
+    "take _ []     = []",
+    "take 0 _      = []",
+    "take i (x:xs) = x : take (i - 1) xs",
+    "drop _ []     = []",
+    "drop 0 xs     = xs",
+    "drop i (_:xs) = drop (i - 1) xs",
 
     ""]

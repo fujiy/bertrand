@@ -76,8 +76,8 @@ evalF xs = case last xs of
             m <- parseS 0 $ init s
             maybe (return ())
                   (\e -> modify (`mappend` REPLST e [])) m
-            s <- get
-            traceShow s $ return ()
+            -- s <- get
+            -- traceShow s $ return ()
     '?' -> case preprocess (init xs) of
         ("", _) -> return ()
         (s,  _) -> do
@@ -85,7 +85,8 @@ evalF xs = case last xs of
             whenJust m $ \e -> do
                 let a = head . fromJust . M.lookup "it" $ binds e
                 REPLST env _ <- get
-                traceShow ('?', s, env) $ outputStrLn . evalShow .
+                -- traceShow ('?', s, env) $
+                outputStrLn . evalShow .
                     Env (fst preludeM){depth = -2} $ Env env{depth = -1} a
     _   -> case preprocess xs of
         ("", _) -> return ()
@@ -94,7 +95,7 @@ evalF xs = case last xs of
             whenJust m $ \e -> do
                 let a = head . fromJust . M.lookup "it" $ binds e
                 REPLST env _ <- get
-                outputStrLn $ show a
+                -- outputStrLn $ show a
                 outputStrLn . evalShow .
                     Env (fst preludeM){depth = -2} $ Env env{depth = -1} a
 
@@ -108,7 +109,8 @@ parseS i s = do
         (return . Just) $ parse (snd preludeM ++ ops) i s
 
 preludeM :: (Envir, [ParseOption])
-preludeM = traceShowId $
+preludeM =
+    -- traceShowId $
           let (s, ops) = preprocess prelude
           in (mconcat $ rights $ map (parse ops (-1)) $ lines s, ops)
 
